@@ -803,6 +803,9 @@ func validateDeployPlan(plan DeployPlan) error {
 		if strings.TrimSpace(req.LocalPath) == "" {
 			return fmt.Errorf("deploy plan contains upload with empty local_path")
 		}
+		if err := validateSHA256Hex("upload content_sha256", req.ContentSHA256); err != nil {
+			return fmt.Errorf("invalid upload content_sha256 %q: %w", req.ContentSHA256, err)
+		}
 		if plan.baseDir != "" {
 			if _, err := resolveContainedArtifactPath(plan.baseDir, req.LocalPath, "upload local_path"); err != nil {
 				return fmt.Errorf("invalid upload local_path %q: %w", req.LocalPath, err)
@@ -826,6 +829,11 @@ func validateDeployPlan(plan DeployPlan) error {
 		if hasURL {
 			if err := validateVerifyCheckURL(plan, check.URL); err != nil {
 				return err
+			}
+		}
+		if strings.TrimSpace(check.ExpectSHA256) != "" {
+			if err := validateSHA256Hex("verify expect_sha256", check.ExpectSHA256); err != nil {
+				return fmt.Errorf("invalid verify expect_sha256 %q: %w", check.ExpectSHA256, err)
 			}
 		}
 	}
@@ -942,6 +950,16 @@ func (a *LocalOriginAdapter) Upload(ctx context.Context, req UploadRequest) (boo
 	if err != nil {
 		return false, err
 	}
+	if err := validateSHA256Hex("upload content_sha256", req.ContentSHA256); err != nil {
+		return false, err
+	}
+	sourceHash, _, err := hashFileContext(ctx, req.LocalPath)
+	if err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(sourceHash, req.ContentSHA256) {
+		return false, fmt.Errorf("upload local_path %q hash mismatch: expected %s got %s", req.LocalPath, req.ContentSHA256, sourceHash)
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return false, err
 	}
@@ -1010,7 +1028,7 @@ func runDeliveryVerifyPlan(ctx context.Context, deployPlan DeployPlan, stdout io
 		return summary, nil
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := newDeliveryVerifyHTTPClient(deployPlan)
 
 	for _, check := range deployPlan.Verify.Checks {
 		if err := ctx.Err(); err != nil {
@@ -1119,6 +1137,18 @@ func isWindowsDriveVolume(value string) bool {
 
 func hasWindowsDrivePath(path string) bool {
 	return len(path) >= 3 && path[0] == '/' && isWindowsDriveVolume(path[1:3])
+}
+
+func newDeliveryVerifyHTTPClient(plan DeployPlan) *http.Client {
+	return &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after %d redirects", len(via))
+			}
+			return validateVerifyCheckURL(plan, req.URL.String())
+		},
+	}
 }
 
 func verifyHTTPURL(ctx context.Context, client *http.Client, targetURL string, check VerifyCheck) (bool, string, error) {
@@ -1502,6 +1532,20 @@ func validateVerifyCheckURL(plan DeployPlan, rawURL string) error {
 	}
 	if !urlPathWithinBase(baseURL, parsed) {
 		return fmt.Errorf("verify url %q must stay under cdn.base_url %q", rawURL, plan.CDN.BaseURL)
+	}
+	return nil
+}
+
+func validateSHA256Hex(label string, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("%s cannot be empty", label)
+	}
+	if len(trimmed) != sha256.Size*2 {
+		return fmt.Errorf("%s must be %d hex characters", label, sha256.Size*2)
+	}
+	if _, err := hex.DecodeString(trimmed); err != nil {
+		return fmt.Errorf("%s must be valid hex: %w", label, err)
 	}
 	return nil
 }

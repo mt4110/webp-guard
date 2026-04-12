@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -484,7 +487,11 @@ func TestValidateDeployPlanRejectsEscapingUploadLocalPath(t *testing.T) {
 			err := validateDeployPlan(DeployPlan{
 				baseDir: planBaseDir,
 				Uploads: []UploadRequest{
-					{LocalPath: tc.localPath, ObjectKey: "assets/hero.webp"},
+					{
+						LocalPath:     tc.localPath,
+						ObjectKey:     "assets/hero.webp",
+						ContentSHA256: strings.Repeat("0", 64),
+					},
 				},
 			})
 			if err == nil {
@@ -494,6 +501,24 @@ func TestValidateDeployPlanRejectsEscapingUploadLocalPath(t *testing.T) {
 				t.Fatalf("unexpected validation error: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateDeployPlanRejectsUploadWithoutContentHash(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		baseDir: t.TempDir(),
+		Uploads: []UploadRequest{
+			{
+				LocalPath: "artifacts/hero.webp",
+				ObjectKey: "assets/hero.webp",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing upload content_sha256 to fail validation")
+	}
+	if !strings.Contains(err.Error(), "upload content_sha256") {
+		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
 
@@ -565,6 +590,46 @@ func TestValidateDeployPlanRejectsVerifyURLWhenCDNBaseURLEmpty(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cdn.base_url is empty") {
 		t.Fatalf("unexpected verify url validation error: %v", err)
+	}
+}
+
+func TestRunDeliveryVerifyPlanRejectsRedirectOutsideCDNBaseURL(t *testing.T) {
+	var escapedHits atomic.Int32
+	escapedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		escapedHits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer escapedServer.Close()
+
+	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, escapedServer.URL+"/outside", http.StatusFound)
+	}))
+	defer redirectServer.Close()
+
+	plan := DeployPlan{
+		CDN: CDNTarget{
+			BaseURL: redirectServer.URL + "/assets",
+		},
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+			Checks: []VerifyCheck{
+				{URL: redirectServer.URL + "/assets/hero.webp"},
+			},
+		},
+	}
+	if err := validateDeployPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := runDeliveryVerifyPlan(context.Background(), plan, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected redirect outside cdn.base_url to fail verification")
+	}
+	if !strings.Contains(err.Error(), "cdn.base_url") {
+		t.Fatalf("unexpected verify redirect error: %v", err)
+	}
+	if got := escapedHits.Load(); got != 0 {
+		t.Fatalf("expected redirect destination not to be fetched, got %d hits", got)
 	}
 }
 
@@ -672,6 +737,37 @@ func TestLocalOriginAdapterRejectsSymlinkEscapeTargetPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "object key") || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("unexpected target path error: %v", err)
+	}
+}
+
+func TestLocalOriginAdapterUploadRejectsSourceHashMismatch(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "hero.webp")
+	if err := os.WriteFile(sourcePath, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	contentHash, _, err := hashFileContext(context.Background(), sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("mutated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := &LocalOriginAdapter{RootDir: t.TempDir()}
+	_, err = adapter.Upload(context.Background(), UploadRequest{
+		LocalPath:      sourcePath,
+		ObjectKey:      "assets/hero.webp",
+		ContentSHA256:  contentHash,
+		SkipIfSameHash: true,
+	})
+	if err == nil {
+		t.Fatal("expected upload with mismatched content hash to fail")
+	}
+	if !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("unexpected upload error: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(adapter.RootDir, "assets", "hero.webp")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected target not to be written, got err=%v", statErr)
 	}
 }
 
