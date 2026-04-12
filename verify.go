@@ -14,7 +14,7 @@ import (
 
 var webpDimensionsDecoder = decodeWebPDimensions
 
-func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary, error) {
+func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary Summary, err error) {
 	if err := ctx.Err(); err != nil {
 		return Summary{}, err
 	}
@@ -22,15 +22,19 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 	previousGOMAXPROCS := runtime.GOMAXPROCS(cfg.CPUs)
 	defer runtime.GOMAXPROCS(previousGOMAXPROCS)
 
-	reportWriter, err := newReportWriter(cfg.ReportPath)
+	reportWriter, err := reportWriterFactory(cfg.ReportPath)
 	if err != nil {
 		return Summary{}, err
 	}
 	defer func() {
-		_ = reportWriter.Close()
+		if reportWriter != nil {
+			if closeErr := reportWriter.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
 	}()
 
-	summary := Summary{
+	summary = Summary{
 		Command:      string(modeVerify),
 		RootDir:      cfg.RootDir,
 		StartedAt:    time.Now().UTC(),
@@ -146,6 +150,10 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 	summary.FinishedAt = time.Now().UTC()
 	progress.Finish(summary)
 	writeLine(stdout, formatSummary(summary))
+	if err := reportWriter.Close(); err != nil {
+		return Summary{}, err
+	}
+	reportWriter = nil
 	return summary, nil
 }
 

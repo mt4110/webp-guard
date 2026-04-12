@@ -201,6 +201,16 @@ func TestCompletionCommandWritesScriptToStdout(t *testing.T) {
 	if !strings.Contains(stdout.String(), "complete -F _webp_guard webp-guard") {
 		t.Fatalf("expected bash completion script, got %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "version)\n\t\t\tflags=\"-h --help\"") {
+		t.Fatalf("expected version flags in bash completion script, got %q", stdout.String())
+	}
+}
+
+func TestPowerShellCompletionIncludesVersionFlags(t *testing.T) {
+	script := renderPowerShellCompletionScript()
+	if !strings.Contains(script, `"version" = @("-h", "--help")`) {
+		t.Fatalf("expected version flags in PowerShell completion script, got %q", script)
+	}
 }
 
 func TestHelpCommandPrintsSubcommandUsage(t *testing.T) {

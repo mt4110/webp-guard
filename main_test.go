@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -42,6 +43,29 @@ func stubWebPDimensions(t *testing.T, fn func(path string) (int, int, error)) {
 	t.Cleanup(func() {
 		webpDimensionsDecoder = originalDecoder
 	})
+}
+
+func stubReportWriterFactory(t *testing.T, fn func(path string) (reportWriter, error)) {
+	t.Helper()
+
+	originalFactory := reportWriterFactory
+	reportWriterFactory = fn
+	t.Cleanup(func() {
+		reportWriterFactory = originalFactory
+	})
+}
+
+type stubReportWriter struct {
+	writeErr error
+	closeErr error
+}
+
+func (w *stubReportWriter) Write(FileRecord) error {
+	return w.writeErr
+}
+
+func (w *stubReportWriter) Close() error {
+	return w.closeErr
 }
 
 func newDimensionAwareFakeEncoder(t *testing.T, size int, hook func(inputPath string, outputPath string, quality int) error) fakeEncoder {
@@ -492,6 +516,59 @@ func TestVerifyRejectsEqualSizedOutput(t *testing.T) {
 	}
 	if !strings.Contains(string(reportContent), `"status":"verify_size_regression"`) {
 		t.Fatalf("expected verify_size_regression in report, got %s", reportContent)
+	}
+}
+
+func TestRunProcessCommandReturnsReportCloseError(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "sample.jpg")
+	writeJPEG(t, source, 800, 400)
+
+	stubReportWriterFactory(t, func(path string) (reportWriter, error) {
+		return &stubReportWriter{closeErr: errors.New("flush failed")}, nil
+	})
+
+	cfg := testConfig(root)
+
+	var stdout bytes.Buffer
+	_, err := RunProcessCommand(context.Background(), cfg, newDimensionAwareFakeEncoder(t, 64, nil), &stdout)
+	if err == nil {
+		t.Fatal("expected report close error")
+	}
+	if !strings.Contains(err.Error(), "flush failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunVerifyReturnsReportCloseError(t *testing.T) {
+	root := t.TempDir()
+	manifest := filepath.Join(root, "manifest.json")
+	manifestContent := `{
+  "version": 1,
+  "generated_at": "2026-04-10T00:00:00Z",
+  "command": "bulk",
+  "root_dir": ".",
+  "entries": [],
+  "summary": {}
+}`
+	if err := os.WriteFile(manifest, []byte(manifestContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stubReportWriterFactory(t, func(path string) (reportWriter, error) {
+		return &stubReportWriter{closeErr: errors.New("flush failed")}, nil
+	})
+
+	var stdout bytes.Buffer
+	_, err := RunVerify(context.Background(), VerifyConfig{
+		ManifestPath: manifest,
+		MaxWidth:     1200,
+	}, &stdout)
+	if err == nil {
+		t.Fatal("expected report close error")
+	}
+	if !strings.Contains(err.Error(), "flush failed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

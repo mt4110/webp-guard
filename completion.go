@@ -255,6 +255,9 @@ _webp_guard()
 		doctor)
 			flags="%s"
 			;;
+		version)
+			flags="%s"
+			;;
 		completion)
 			flags="%s"
 			;;
@@ -281,6 +284,7 @@ complete -F _webp_guard webp-guard
 		completionWords(verifyDeliveryCompletionFlags),
 		completionWords(initCompletionFlags),
 		completionWords(doctorCompletionFlags),
+		completionWords(versionCommandFlags),
 		completionWords(completionCommandFlags),
 	)
 }
@@ -310,6 +314,7 @@ func renderFishCompletionScript() string {
 	builder.WriteString("complete -c webp-guard -f\n")
 
 	descriptions := map[string]string{
+		"version":         "Show build version information",
 		"bulk":            "Convert images to .webp outputs",
 		"scan":            "Run safety checks without writing outputs",
 		"verify":          "Verify conversion manifest entries",
@@ -371,6 +376,7 @@ Register-ArgumentCompleter -CommandName webp-guard -ScriptBlock {
         "verify-delivery" = @(%s)
         "init" = @(%s)
         "doctor" = @(%s)
+        "version" = @(%s)
         "completion" = @(%s)
     }
 
@@ -443,6 +449,7 @@ Register-ArgumentCompleter -CommandName webp-guard -ScriptBlock {
 		powerShellQuoted(verifyDeliveryCompletionFlags),
 		powerShellQuoted(initCompletionFlags),
 		powerShellQuoted(doctorCompletionFlags),
+		powerShellQuoted(versionCommandFlags),
 		powerShellQuoted(completionCommandFlags),
 	)
 }

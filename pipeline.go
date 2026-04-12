@@ -97,24 +97,28 @@ type Summary struct {
 	StatusCounts map[string]int `json:"status_counts"`
 }
 
-func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, stdout io.Writer) (Summary, error) {
+func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, stdout io.Writer) (summary Summary, err error) {
 	if err := ctx.Err(); err != nil {
 		return Summary{}, err
 	}
 
-	summary := Summary{
+	summary = Summary{
 		Command:      string(cfg.Mode),
 		RootDir:      cfg.RootDir,
 		StartedAt:    time.Now().UTC(),
 		StatusCounts: map[string]int{},
 	}
 
-	reportWriter, err := newReportWriter(cfg.ReportPath)
+	reportWriter, err := reportWriterFactory(cfg.ReportPath)
 	if err != nil {
 		return Summary{}, err
 	}
 	defer func() {
-		_ = reportWriter.Close()
+		if reportWriter != nil {
+			if closeErr := reportWriter.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
 	}()
 
 	manifestWriter, err := newManifestWriter(cfg.ManifestPath, cfg)
@@ -209,6 +213,10 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 	progress.Finish(summary)
 
 	writeLine(stdout, formatSummary(summary))
+	if err := reportWriter.Close(); err != nil {
+		return Summary{}, err
+	}
+	reportWriter = nil
 	return summary, nil
 }
 

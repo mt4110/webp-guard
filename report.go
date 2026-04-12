@@ -16,6 +16,8 @@ type reportWriter interface {
 	Close() error
 }
 
+var reportWriterFactory = newReportWriter
+
 type noopReportWriter struct{}
 
 func (noopReportWriter) Write(FileRecord) error { return nil }
