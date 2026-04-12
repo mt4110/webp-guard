@@ -206,6 +206,12 @@ func TestCompletionCommandWritesScriptToStdout(t *testing.T) {
 	}
 }
 
+func TestRootCompletionFlagsIncludeVersionAliases(t *testing.T) {
+	if !strings.Contains(completionWords(rootCompletionFlags), "-version") || !strings.Contains(completionWords(rootCompletionFlags), "--version") {
+		t.Fatalf("expected root completion flags to include version aliases, got %v", rootCompletionFlags)
+	}
+}
+
 func TestBashCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
 	script := renderBashCompletionScript()
 	if strings.Contains(script, `-shell|completion)`) {

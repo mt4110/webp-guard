@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1123,6 +1124,32 @@ func TestProcessConfigRejectsWorkersAboveCPULimit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot exceed cpus") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProcessConfigRejectsNaNFocusCoordinates(t *testing.T) {
+	raw := newProcessFlagValues()
+	raw.rootDir = t.TempDir()
+	raw.focusX = math.NaN()
+
+	_, err := raw.toProcessConfig(modeBulk)
+	if err == nil {
+		t.Fatal("expected NaN focus-x to fail")
+	}
+	if !strings.Contains(err.Error(), "focus-x must be between 0.0 and 1.0") {
+		t.Fatalf("unexpected error for NaN focus-x: %v", err)
+	}
+
+	raw = newProcessFlagValues()
+	raw.rootDir = t.TempDir()
+	raw.focusY = math.NaN()
+
+	_, err = raw.toProcessConfig(modeBulk)
+	if err == nil {
+		t.Fatal("expected NaN focus-y to fail")
+	}
+	if !strings.Contains(err.Error(), "focus-y must be between 0.0 and 1.0") {
+		t.Fatalf("unexpected error for NaN focus-y: %v", err)
 	}
 }
 

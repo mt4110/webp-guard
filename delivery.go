@@ -779,6 +779,11 @@ func validateDeployPlan(plan DeployPlan) error {
 		if strings.TrimSpace(req.LocalPath) == "" {
 			return fmt.Errorf("deploy plan contains upload with empty local_path")
 		}
+		if plan.baseDir != "" {
+			if _, err := resolveContainedArtifactPath(plan.baseDir, req.LocalPath, "upload local_path"); err != nil {
+				return fmt.Errorf("invalid upload local_path %q: %w", req.LocalPath, err)
+			}
+		}
 		if _, err := normalizeObjectKey(req.ObjectKey); err != nil {
 			return fmt.Errorf("invalid object key %q: %w", req.ObjectKey, err)
 		}
@@ -1559,7 +1564,7 @@ func stageArtifactFile(ctx context.Context, sourcePath string, artifactRoot stri
 }
 
 func resolveUploadRequest(planBaseDir string, req UploadRequest) (UploadRequest, error) {
-	resolvedPath, err := resolvePlanPath(planBaseDir, req.LocalPath)
+	resolvedPath, err := resolveContainedArtifactPath(planBaseDir, req.LocalPath, "upload local_path")
 	if err != nil {
 		return UploadRequest{}, err
 	}

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -768,10 +769,10 @@ func (raw *processFlagValues) toProcessConfig(mode CommandMode) (ProcessConfig, 
 		if raw.maxWidth <= 0 {
 			return ProcessConfig{}, fmt.Errorf("max-width must be > 0")
 		}
-		if raw.focusX < 0 || raw.focusX > 1 {
+		if math.IsNaN(raw.focusX) || math.IsInf(raw.focusX, 0) || raw.focusX < 0 || raw.focusX > 1 {
 			return ProcessConfig{}, fmt.Errorf("focus-x must be between 0.0 and 1.0")
 		}
-		if raw.focusY < 0 || raw.focusY > 1 {
+		if math.IsNaN(raw.focusY) || math.IsInf(raw.focusY, 0) || raw.focusY < 0 || raw.focusY > 1 {
 			return ProcessConfig{}, fmt.Errorf("focus-y must be between 0.0 and 1.0")
 		}
 		if raw.quality < 0 || raw.quality > 100 {

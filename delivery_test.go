@@ -458,6 +458,45 @@ func TestValidateDeployPlanRejectsEscapingVerifyObjectKey(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsEscapingUploadLocalPath(t *testing.T) {
+	planBaseDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.bin")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		localPath string
+	}{
+		{
+			name:      "relative traversal",
+			localPath: "../outside.bin",
+		},
+		{
+			name:      "absolute outside root",
+			localPath: outside,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateDeployPlan(DeployPlan{
+				baseDir: planBaseDir,
+				Uploads: []UploadRequest{
+					{LocalPath: tc.localPath, ObjectKey: "assets/hero.webp"},
+				},
+			})
+			if err == nil {
+				t.Fatal("expected escaping upload local_path to fail validation")
+			}
+			if !strings.Contains(err.Error(), "invalid upload local_path") {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
 func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
 	planBaseDir := t.TempDir()
 	originRoot := filepath.Join(planBaseDir, "origin")
@@ -478,6 +517,25 @@ func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
 		t.Fatal("expected escaping verify object key to fail resolution")
 	}
 	if !strings.Contains(err.Error(), "invalid verify object key") {
+		t.Fatalf("unexpected resolve error: %v", err)
+	}
+}
+
+func TestResolveUploadRequestRejectsEscapingLocalPath(t *testing.T) {
+	planBaseDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.bin")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveUploadRequest(planBaseDir, UploadRequest{
+		LocalPath: outside,
+		ObjectKey: "assets/hero.webp",
+	})
+	if err == nil {
+		t.Fatal("expected escaping upload local_path to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "upload local_path") || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("unexpected resolve error: %v", err)
 	}
 }
