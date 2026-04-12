@@ -7,6 +7,87 @@ This is the English companion README. The primary README for this repository is 
 `webp-guard` is a beta Go CLI for safe, resumable bulk image scanning, WebP generation, and cache-first delivery planning.
 It keeps the original asset, writes `.webp` next to it by default or under `-out-dir` when you want a clean artifact tree, and discards the candidate when the output is larger than the source.
 
+Related design note:
+
+- [Release Workflow And Installation Design](./docs/release-installation-design.md) (Japanese primary)
+
+## Installation
+
+### Recommended: Release Binary
+
+For the first run, the primary path is to download an archive from [GitHub Releases](https://github.com/mt4110/webp-guard/releases/latest) and place `webp-guard` on your `PATH`.
+
+`cwebp` is still a separate runtime dependency.
+
+- macOS: `brew install webp`
+- Ubuntu / Debian: `sudo apt-get update && sudo apt-get install -y webp`
+- Windows: download the [Google WebP utilities](https://developers.google.com/speed/webp/download) and add the extracted `bin` directory to `PATH`
+
+Sanity check:
+
+```bash
+webp-guard version
+webp-guard help
+```
+
+### Go Install
+
+Use this when you already manage your own Go toolchain.
+
+```bash
+go install github.com/mt4110/webp-guard@latest
+```
+
+`cwebp` is still required separately.
+
+### Nix
+
+The reproducible contributor path stays available.
+
+```bash
+nix develop
+go test ./...
+go build -o webp-guard .
+```
+
+### Support Matrix
+
+| Target | Phase 1 validation |
+| --- | --- |
+| macOS arm64 | release build/package + native smoke |
+| macOS amd64 | release build/package |
+| Linux amd64 | release build/package + native smoke |
+| Windows amd64 | release build/package + native smoke |
+| Linux arm64 | backlog |
+
+### When `cwebp` Is Required
+
+| Command | `cwebp` |
+| --- | --- |
+| `scan` | Not required |
+| `verify` | Not required |
+| `plan` | Not required |
+| `publish` | Not required |
+| `verify-delivery` | Not required |
+| `bulk` | Required unless `-dry-run` is used |
+| `resume` | Required unless `-dry-run` is used |
+
+## Quick Start
+
+Start with the path that still works before `cwebp` is installed.
+
+```bash
+webp-guard version
+
+webp-guard scan --dir ./assets --report ./out/scan.jsonl
+
+webp-guard bulk \
+  --dir ./assets \
+  --out-dir ./out/assets \
+  --dry-run \
+  --report ./out/bulk-plan.jsonl
+```
+
 ## Current Repo Understanding
 
 - The original repo was a small Go CLI centered on recursive PNG scanning and `cwebp` execution.
@@ -41,14 +122,23 @@ It keeps the original asset, writes `.webp` next to it by default or under `-out
 - Does not follow symlinks by default
 - Skips hidden directories and common system/VCS directories by default
 - Streams file-by-file with a worker pool instead of loading the entire set into memory
+- Shows a progress bar plus ETA on interactive terminals so long-running batches stay legible
+- Propagates SIGINT / SIGTERM through context cancellation and cleans staged temp files before exit
 - Generates a public `release-manifest.json` without local filesystem paths
 - Generates `deploy-plan.json` for a concrete environment
 - Keeps `conversion-manifest.json` and `deploy-plan.json` artifact-relative instead of baking machine-specific absolute paths
 - Supports `publish -dry-run=plan`, local filesystem publish, and `verify-delivery`
+- Auto-discovers `webp-guard.toml` from the cwd upward so projects can share defaults
+- Adds `init` to generate a starter config file
+- Adds `doctor` to check config discovery, `cwebp -version`, temp-dir access, and representative config paths
+- Adds `completion` to emit shell completion scripts
+- Keeps human-readable logs on stderr while `-json` reserves stdout for machine-readable summaries
 
 ## Commands
 
 ```bash
+webp-guard version
+
 webp-guard scan --dir ./assets --report ./reports/scan.jsonl
 
 webp-guard bulk \
@@ -100,6 +190,19 @@ webp-guard publish \
 
 webp-guard verify-delivery \
   --plan ./out/deploy-plan.dev.json
+
+webp-guard init
+
+webp-guard doctor
+
+webp-guard help publish
+
+webp-guard completion zsh > ~/.zsh/completions/_webp-guard
+
+webp-guard bulk \
+  --json \
+  --dry-run \
+  --dir ./assets > ./out/bulk-summary.json
 ```
 
 Legacy compatibility is still supported:
@@ -136,6 +239,26 @@ webp-guard -dir ./assets -dry-run
 - `plan -release-manifest`: public manifest emitted without local absolute paths
 - `plan -deploy-plan`: environment-specific upload / purge / verify instructions
 - `publish -dry-run`: `off`, `plan`, or `verify`
+- `-config`: explicitly point to `webp-guard.toml`
+- `-no-config`: disable config-file loading
+- `-json`: emit the command summary as JSON on stdout while keeping human logs on stderr
+
+## Help, Doctor, And Completion
+
+- `webp-guard version` prints embedded build metadata
+- `webp-guard help <command>` prints focused usage for one subcommand
+- `webp-guard -h`, `webp-guard --help`, and `webp-guard <subcommand> -h` print usage and exit with code `0`
+- `webp-guard doctor` checks config discovery, `cwebp -version`, temp-dir writability, CPU visibility, and representative config input paths
+- `webp-guard completion bash|zsh|fish|powershell` emits a completion script to stdout
+- `doctor -json` keeps the report machine-readable for CI or wrapper scripts
+
+## Config File
+
+- The default config file name is `webp-guard.toml`
+- When omitted, `webp-guard` searches upward from the current working directory
+- Relative paths inside the config are resolved relative to the config file itself, not the runtime cwd
+- Precedence is `CLI flags > webp-guard.toml > built-in defaults`
+- `webp-guard init` writes a starter config
 
 ## Security Scan Policy
 
@@ -178,6 +301,9 @@ Defaults:
   - environment-specific upload, purge, and verify instructions
   - keeps upload inputs relative to the plan artifact, so the artifact can move between runners
   - stages immutable upload files under the artifact using their final object-key layout
+- `path portability`:
+  - artifact-relative manifests and plans are meant to move within the same path-resolution environment
+  - treat native Windows paths such as `C:\...` and WSL2 mounts such as `/mnt/c/...` as different environments and regenerate manifests/plans when crossing that boundary
 - `resume`:
   - reads a previous report and skips entries that already reached a terminal state
   - reuses only entries whose config fingerprint matches the current run

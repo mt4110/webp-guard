@@ -7,6 +7,87 @@
 `webp-guard` は、安全に再実行できる bulk scan + WebP 生成と、cache-first 配信 planning を担う beta の Go CLI です。
 元画像は残し、既定では隣に `.webp` を生成し、CI などで作業ツリーを汚したくないときは `-out-dir` 配下にミラー出力できます。変換後サイズが悪化した場合はその生成物を破棄します。
 
+関連設計:
+
+- [Release Workflow And Installation Design](./docs/release-installation-design.md)
+
+## Installation
+
+### Recommended: Release Binary
+
+まず試すなら、[GitHub Releases](https://github.com/mt4110/webp-guard/releases/latest) から archive を取り、`webp-guard` を `PATH` に置く経路を正本にします。
+
+`cwebp` は別途必要です。
+
+- macOS: `brew install webp`
+- Ubuntu / Debian: `sudo apt-get update && sudo apt-get install -y webp`
+- Windows: [Google の WebP utilities](https://developers.google.com/speed/webp/download) を取得して、展開した `bin` を `PATH` に追加
+
+導入確認:
+
+```bash
+webp-guard version
+webp-guard help
+```
+
+### Go Install
+
+Go toolchain を自前で管理しているならこちらです。
+
+```bash
+go install github.com/mt4110/webp-guard@latest
+```
+
+この場合も `cwebp` は別途必要です。
+
+### Nix
+
+contributor 向けの再現性ある開発導線はそのまま残します。
+
+```bash
+nix develop
+go test ./...
+go build -o webp-guard .
+```
+
+### Support Matrix
+
+| Target | Phase 1 validation |
+| --- | --- |
+| macOS arm64 | release build/package + native smoke |
+| macOS amd64 | release build/package |
+| Linux amd64 | release build/package + native smoke |
+| Windows amd64 | release build/package + native smoke |
+| Linux arm64 | backlog |
+
+### `cwebp` Required?
+
+| コマンド | `cwebp` |
+| --- | --- |
+| `scan` | 不要 |
+| `verify` | 不要 |
+| `plan` | 不要 |
+| `publish` | 不要 |
+| `verify-delivery` | 不要 |
+| `bulk` | `-dry-run` 以外では必要 |
+| `resume` | `-dry-run` 以外では必要 |
+
+## Quick Start
+
+最初は `cwebp` がなくても進められるところから始めます。
+
+```bash
+webp-guard version
+
+webp-guard scan --dir ./assets --report ./out/scan.jsonl
+
+webp-guard bulk \
+  --dir ./assets \
+  --out-dir ./out/assets \
+  --dry-run \
+  --report ./out/bulk-plan.jsonl
+```
+
 ## 現状 repo の理解
 
 - もともとは Go 製の小さな CLI で、再帰的に PNG を見つけて `cwebp` を叩く構成でした。
@@ -42,14 +123,23 @@
 - symlink は既定で follow しない
 - hidden directory と代表的な system/VCS directory は既定で skip
 - 全件一括読込ではなく、1ファイルずつ流して worker pool で並列化
+- TTY では進捗バーと ETA を出し、長時間バッチでも今どこにいるか分かる
+- SIGINT / SIGTERM を受けたら context cancel を流し、一時ファイルを掃除して止まる
 - local path を含まない public `release-manifest.json` を生成
 - 環境別 `deploy-plan.json` を生成
 - `conversion-manifest.json` と `deploy-plan.json` は machine 固有の absolute path ではなく artifact-relative に保持
 - `publish -dry-run=plan`、local filesystem publish、`verify-delivery` に対応
+- `webp-guard.toml` を cwd から親方向へ自動探索し、project ごとの既定値を共有できる
+- `init` で starter config を生成できる
+- `doctor` で config discovery / `cwebp -version` / temp dir / 代表 path を診断できる
+- `completion` で shell completion script を生成できる
+- 人間向けログは stderr、`-json` の機械可読 summary は stdout に分離できる
 
 ## コマンド例
 
 ```bash
+webp-guard version
+
 webp-guard scan --dir ./assets --report ./reports/scan.jsonl
 
 webp-guard bulk \
@@ -101,6 +191,19 @@ webp-guard publish \
 
 webp-guard verify-delivery \
   --plan ./out/deploy-plan.dev.json
+
+webp-guard init
+
+webp-guard doctor
+
+webp-guard help publish
+
+webp-guard completion zsh > ~/.zsh/completions/_webp-guard
+
+webp-guard bulk \
+  --json \
+  --dry-run \
+  --dir ./assets > ./out/bulk-summary.json
 ```
 
 従来形式も互換で残しています。
@@ -136,6 +239,26 @@ webp-guard -dir ./assets -dry-run
 - `plan -release-manifest`: local absolute path を含まない public manifest
 - `plan -deploy-plan`: 環境別 upload / purge / verify 指示書
 - `publish -dry-run`: `off`, `plan`, `verify`
+- `-config`: 明示的に `webp-guard.toml` を指定
+- `-no-config`: config 自動読込を無効化
+- `-json`: human log を stderr に残したまま summary JSON を stdout に出す
+
+## Help / Doctor / Completion
+
+- `webp-guard version` で埋め込み build metadata を確認
+- `webp-guard help <command>` で subcommand ごとの使い方を確認
+- `webp-guard -h`、`webp-guard --help`、`webp-guard <subcommand> -h` は usage を出して exit code `0`
+- `webp-guard doctor` で config 自動発見、`cwebp -version`、temp dir の書き込み可否、CPU 認識、config 内の代表 input path を確認
+- `webp-guard completion bash|zsh|fish|powershell` で補完 script を stdout に出力
+- `doctor -json` は CI などから機械可読に扱える
+
+## Config File
+
+- 既定の設定ファイル名は `webp-guard.toml`
+- 指定しなければ、現在の working directory から親ディレクトリ方向へ自動探索
+- config 内の相対 path は、実行時の cwd ではなく config file 自身の場所を基準に解決
+- 優先順位は `CLI flags > webp-guard.toml > built-in defaults`
+- `webp-guard init` で starter config を生成
 
 ## Security Scan 方針
 
@@ -178,6 +301,9 @@ webp-guard -dir ./assets -dry-run
   - 環境別の upload / purge / verify 指示書
   - upload 入力は plan artifact からの相対 path で保持する
   - immutable upload 用ファイルは final object key の配置で artifact 内に stage する
+- path portability:
+  - artifact-relative manifest/plan は同系統のパス解決環境で持ち運ぶ前提
+  - Windows ネイティブの `C:\...` と WSL2 の `/mnt/c/...` は別環境として扱い、境界を跨ぐときは manifest / plan を再生成する
 - resume:
   - 過去 report の terminal state を読んで再処理を避ける
   - ただし現在の実行設定と fingerprint が一致した entry だけを再利用する

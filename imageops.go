@@ -71,6 +71,10 @@ func processJob(ctx context.Context, cfg ProcessConfig, job FileJob, encoder Enc
 		record.OutputPath = variantPlans[0].OutputPath
 	}
 
+	if err := ctx.Err(); err != nil {
+		return canceledRecord(record, start, err)
+	}
+
 	if cfg.Mode != modeScan {
 		existingReason := "one or more outputs already exist"
 		if len(variantPlans) == 1 {
@@ -171,6 +175,10 @@ func processJob(ctx context.Context, cfg ProcessConfig, job FileJob, encoder Enc
 	}
 	record.Orientation = orientation
 
+	if err := ctx.Err(); err != nil {
+		return canceledRecord(record, start, err)
+	}
+
 	img, err := decodeImage(job.Path, magic)
 	if err != nil {
 		record.Status = "failed_decode"
@@ -202,6 +210,10 @@ func processJob(ctx context.Context, cfg ProcessConfig, job FileJob, encoder Enc
 
 	discardedSupporting := 0
 	for index, plan := range variantPlans {
+		if err := ctx.Err(); err != nil {
+			return canceledRecord(record, start, err)
+		}
+
 		variantImage, cropped, resized := renderOutputVariant(img, cfg, plan)
 		variantInfo := OutputVariantInfo{
 			Name:         plan.Name,
@@ -337,6 +349,10 @@ func processJob(ctx context.Context, cfg ProcessConfig, job FileJob, encoder Enc
 	}
 
 	for index := range renderedVariants {
+		if err := ctx.Err(); err != nil {
+			return canceledRecord(record, start, err)
+		}
+
 		if err := commitTempOutput(renderedVariants[index].tempPath, renderedVariants[index].outputPath); err != nil {
 			record.Status = "failed_commit"
 			record.Error = decorateVariantPathError(renderedVariants[index].outputPath, err.Error())
@@ -352,6 +368,13 @@ func processJob(ctx context.Context, cfg ProcessConfig, job FileJob, encoder Enc
 	} else {
 		record.Status = "converted"
 	}
+	record.DurationMillis = time.Since(start).Milliseconds()
+	return record
+}
+
+func canceledRecord(record FileRecord, start time.Time, err error) FileRecord {
+	record.Status = "failed_canceled"
+	record.Error = err.Error()
 	record.DurationMillis = time.Since(start).Milliseconds()
 	return record
 }

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -16,6 +18,7 @@ const (
 	exitConfigError = 1
 	exitScanIssues  = 2
 	exitVerifyIssue = 3
+	exitInterrupted = 130
 )
 
 type CommandMode string
@@ -77,6 +80,16 @@ type VerifyConfig struct {
 
 type stringListFlag []string
 
+func parseCommandFlags(fs *flag.FlagSet, args []string) (bool, error) {
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
 func (s *stringListFlag) String() string {
 	return strings.Join(*s, ",")
 }
@@ -86,12 +99,46 @@ func (s *stringListFlag) Set(value string) error {
 	return nil
 }
 
+type overridingStringListValue struct {
+	target  *stringListFlag
+	touched bool
+}
+
+func newOverridingStringListValue(target *stringListFlag) *overridingStringListValue {
+	return &overridingStringListValue{target: target}
+}
+
+func (v *overridingStringListValue) String() string {
+	if v == nil || v.target == nil {
+		return ""
+	}
+	return v.target.String()
+}
+
+func (v *overridingStringListValue) Set(value string) error {
+	if !v.touched {
+		*v.target = (*v.target)[:0]
+		v.touched = true
+	}
+	return v.target.Set(value)
+}
+
 func runBulkCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer, legacy bool) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("bulk", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	raw := newProcessFlagValues()
+	applyProcessFileConfig(raw, runtimeCfg.File.Process, runtimeCfg.BaseDir)
+	applyProcessFileConfig(raw, runtimeCfg.File.Bulk, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
 	bindProcessFlags(fs, raw, true)
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	if legacy {
 		fs.Usage = func() {
@@ -103,8 +150,12 @@ func runBulkCommand(ctx context.Context, args []string, encoder Encoder, stdout,
 		}
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 
 	cfg, err := raw.toProcessConfig(modeBulk)
@@ -112,22 +163,45 @@ func runBulkCommand(ctx context.Context, args []string, encoder Encoder, stdout,
 		return exitConfigError, err
 	}
 
-	return runProcess(ctx, cfg, encoder, stdout)
+	summary, exitCode, err := runProcess(ctx, cfg, encoder, stderr)
+	if err != nil {
+		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
+	}
+	return exitCode, nil
 }
 
 func runScanCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	raw := newProcessFlagValues()
+	applyProcessFileConfig(raw, runtimeCfg.File.Process, runtimeCfg.BaseDir)
+	applyProcessFileConfig(raw, runtimeCfg.File.Scan, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
 	bindProcessFlags(fs, raw, false)
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	fs.Usage = func() {
 		printScanUsage(stderr)
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 
 	cfg, err := raw.toProcessConfig(modeScan)
@@ -135,22 +209,45 @@ func runScanCommand(ctx context.Context, args []string, encoder Encoder, stdout,
 		return exitConfigError, err
 	}
 
-	return runProcess(ctx, cfg, encoder, stdout)
+	summary, exitCode, err := runProcess(ctx, cfg, encoder, stderr)
+	if err != nil {
+		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
+	}
+	return exitCode, nil
 }
 
 func runResumeCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	raw := newProcessFlagValues()
+	applyProcessFileConfig(raw, runtimeCfg.File.Process, runtimeCfg.BaseDir)
+	applyProcessFileConfig(raw, runtimeCfg.File.Resume, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
 	bindProcessFlags(fs, raw, true)
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	fs.Usage = func() {
 		printResumeUsage(stderr)
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 
 	cfg, err := raw.toProcessConfig(modeResume)
@@ -161,36 +258,48 @@ func runResumeCommand(ctx context.Context, args []string, encoder Encoder, stdou
 		return exitConfigError, fmt.Errorf("resume requires -resume-from pointing to a previous report")
 	}
 
-	return runProcess(ctx, cfg, encoder, stdout)
+	summary, exitCode, err := runProcess(ctx, cfg, encoder, stderr)
+	if err != nil {
+		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
+	}
+	return exitCode, nil
 }
 
 func runVerifyCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	raw := struct {
-		rootDir      string
-		manifestPath string
-		reportPath   string
-		maxWidth     int
-		cpus         string
-	}{
-		maxWidth: 1200,
-		cpus:     "auto",
-	}
-
-	fs.StringVar(&raw.rootDir, "dir", "", "Optional root directory override used to resolve source manifest entries")
-	fs.StringVar(&raw.manifestPath, "manifest", "", "Manifest JSON written by bulk")
-	fs.StringVar(&raw.reportPath, "report", "", "Optional verification report path (.jsonl or .csv)")
-	fs.IntVar(&raw.maxWidth, "max-width", 1200, "Maximum allowed output width during verification")
-	fs.StringVar(&raw.cpus, "cpus", "auto", "Logical CPU count to use or 'auto'")
+	raw := newVerifyFlagValues()
+	applyVerifyFileConfig(raw, runtimeCfg.File.Verify, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
+	fs.StringVar(&raw.rootDir, "dir", raw.rootDir, "Optional root directory override used to resolve source manifest entries")
+	fs.StringVar(&raw.manifestPath, "manifest", raw.manifestPath, "Manifest JSON written by bulk")
+	fs.StringVar(&raw.reportPath, "report", raw.reportPath, "Optional verification report path (.jsonl or .csv)")
+	fs.IntVar(&raw.maxWidth, "max-width", raw.maxWidth, "Maximum allowed output width during verification")
+	fs.StringVar(&raw.cpus, "cpus", raw.cpus, "Logical CPU count to use or 'auto'")
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	fs.Usage = func() {
 		printVerifyUsage(stderr)
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 	if raw.manifestPath == "" {
 		return exitConfigError, fmt.Errorf("verify requires -manifest")
@@ -207,57 +316,55 @@ func runVerifyCommand(ctx context.Context, args []string, stdout, stderr io.Writ
 		return exitConfigError, err
 	}
 
-	summary, err := RunVerify(ctx, cfg, stdout)
+	summary, err := RunVerify(ctx, cfg, stderr)
 	if err != nil {
 		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
 	}
 	return summary.ExitCode(modeVerify), nil
 }
 
 func runPlanCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	raw := struct {
-		conversionManifest string
-		releaseManifest    string
-		deployPlan         string
-		environment        string
-		baseURL            string
-		originProvider     string
-		originRoot         string
-		originPrefix       string
-		cdnProvider        string
-		immutablePrefix    string
-		mutablePrefix      string
-		verifySample       int
-	}{
-		originProvider:  "local",
-		cdnProvider:     "noop",
-		immutablePrefix: "assets",
-		mutablePrefix:   "release",
-		verifySample:    3,
-	}
-
-	fs.StringVar(&raw.conversionManifest, "conversion-manifest", "", "Conversion manifest JSON written by bulk")
-	fs.StringVar(&raw.releaseManifest, "release-manifest", "", "Public release manifest JSON to generate")
-	fs.StringVar(&raw.deployPlan, "deploy-plan", "", "Deploy plan JSON to generate")
-	fs.StringVar(&raw.environment, "env", "", "Target environment name, for example dev/stg/prod")
-	fs.StringVar(&raw.baseURL, "base-url", "", "Public base URL used for delivery verify targets")
-	fs.StringVar(&raw.originProvider, "origin-provider", "local", "Origin provider: local")
-	fs.StringVar(&raw.originRoot, "origin-root", "", "Origin root directory when using -origin-provider=local")
-	fs.StringVar(&raw.originPrefix, "origin-prefix", "", "Optional origin object prefix")
-	fs.StringVar(&raw.cdnProvider, "cdn-provider", "noop", "CDN provider: noop")
-	fs.StringVar(&raw.immutablePrefix, "immutable-prefix", "assets", "Prefix used for immutable object keys")
-	fs.StringVar(&raw.mutablePrefix, "mutable-prefix", "release", "Prefix used for mutable object keys")
-	fs.IntVar(&raw.verifySample, "verify-sample", 3, "How many preferred assets to include in delivery verify checks")
+	raw := newPlanFlagValues()
+	applyPlanFileConfig(raw, runtimeCfg.File.Plan, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
+	fs.StringVar(&raw.conversionManifest, "conversion-manifest", raw.conversionManifest, "Conversion manifest JSON written by bulk")
+	fs.StringVar(&raw.releaseManifest, "release-manifest", raw.releaseManifest, "Public release manifest JSON to generate")
+	fs.StringVar(&raw.deployPlan, "deploy-plan", raw.deployPlan, "Deploy plan JSON to generate")
+	fs.StringVar(&raw.environment, "env", raw.environment, "Target environment name, for example dev/stg/prod")
+	fs.StringVar(&raw.baseURL, "base-url", raw.baseURL, "Public base URL used for delivery verify targets")
+	fs.StringVar(&raw.originProvider, "origin-provider", raw.originProvider, "Origin provider: local")
+	fs.StringVar(&raw.originRoot, "origin-root", raw.originRoot, "Origin root directory when using -origin-provider=local")
+	fs.StringVar(&raw.originPrefix, "origin-prefix", raw.originPrefix, "Optional origin object prefix")
+	fs.StringVar(&raw.cdnProvider, "cdn-provider", raw.cdnProvider, "CDN provider: noop")
+	fs.StringVar(&raw.immutablePrefix, "immutable-prefix", raw.immutablePrefix, "Prefix used for immutable object keys")
+	fs.StringVar(&raw.mutablePrefix, "mutable-prefix", raw.mutablePrefix, "Prefix used for mutable object keys")
+	fs.IntVar(&raw.verifySample, "verify-sample", raw.verifySample, "How many preferred assets to include in delivery verify checks")
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	fs.Usage = func() {
 		printPlanUsage(stderr)
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 
 	cfg, err := normalizePlanConfig(PlanConfig{
@@ -278,32 +385,45 @@ func runPlanCommand(ctx context.Context, args []string, stdout, stderr io.Writer
 		return exitConfigError, err
 	}
 
-	if err := RunPlan(ctx, cfg, stdout); err != nil {
+	summary, err := RunPlan(ctx, cfg, stderr)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
 	}
 	return exitOK, nil
 }
 
 func runPublishCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("publish", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	raw := struct {
-		planPath   string
-		dryRunMode string
-	}{
-		dryRunMode: string(publishDryRunOff),
-	}
-
-	fs.StringVar(&raw.planPath, "plan", "", "Deploy plan JSON written by plan")
-	fs.StringVar(&raw.dryRunMode, "dry-run", string(publishDryRunOff), "Publish mode: off, plan, verify")
+	raw := newPublishFlagValues()
+	applyPublishFileConfig(raw, runtimeCfg.File.Publish, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
+	fs.StringVar(&raw.planPath, "plan", raw.planPath, "Deploy plan JSON written by plan")
+	fs.StringVar(&raw.dryRunMode, "dry-run", raw.dryRunMode, "Publish mode: off, plan, verify")
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	fs.Usage = func() {
 		printPublishUsage(stderr)
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 
 	cfg, err := normalizePublishConfig(PublishConfig{
@@ -314,9 +434,14 @@ func runPublishCommand(ctx context.Context, args []string, stdout, stderr io.Wri
 		return exitConfigError, err
 	}
 
-	summary, err := RunPublish(ctx, cfg, stdout)
+	summary, err := RunPublish(ctx, cfg, stderr)
 	if err != nil {
 		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
 	}
 	if summary.VerifyFailures > 0 {
 		return exitVerifyIssue, nil
@@ -325,23 +450,31 @@ func runPublishCommand(ctx context.Context, args []string, stdout, stderr io.Wri
 }
 
 func runVerifyDeliveryCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	runtimeCfg, err := loadRuntimeConfig(args)
+	if err != nil {
+		return exitConfigError, err
+	}
+
 	fs := flag.NewFlagSet("verify-delivery", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	raw := struct {
-		planPath string
-	}{
-		planPath: "",
-	}
-
-	fs.StringVar(&raw.planPath, "plan", "", "Deploy plan JSON written by plan")
+	raw := newVerifyDeliveryFlagValues()
+	applyVerifyDeliveryFileConfig(raw, runtimeCfg.File.VerifyDelivery, runtimeCfg.BaseDir)
+	bindConfigFlags(fs, &runtimeCfg.Selection)
+	fs.StringVar(&raw.planPath, "plan", raw.planPath, "Deploy plan JSON written by plan")
+	var jsonOutput bool
+	fs.BoolVar(&jsonOutput, "json", false, "Emit the command summary as JSON on stdout")
 
 	fs.Usage = func() {
 		printVerifyDeliveryUsage(stderr)
 	}
 
-	if err := fs.Parse(args); err != nil {
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
 		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
 	}
 
 	cfg, err := normalizeDeliveryVerifyConfig(DeliveryVerifyConfig{
@@ -351,9 +484,14 @@ func runVerifyDeliveryCommand(ctx context.Context, args []string, stdout, stderr
 		return exitConfigError, err
 	}
 
-	summary, err := RunVerifyDelivery(ctx, cfg, stdout)
+	summary, err := RunVerifyDelivery(ctx, cfg, stderr)
 	if err != nil {
 		return exitConfigError, err
+	}
+	if jsonOutput {
+		if err := writeJSONValue(stdout, summary); err != nil {
+			return exitConfigError, err
+		}
 	}
 	if summary.Failures > 0 {
 		return exitVerifyIssue, nil
@@ -361,22 +499,132 @@ func runVerifyDeliveryCommand(ctx context.Context, args []string, stdout, stderr
 	return exitOK, nil
 }
 
-func runProcess(ctx context.Context, cfg ProcessConfig, encoder Encoder, stdout io.Writer) (int, error) {
+func runInitCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	raw := struct {
+		path  string
+		force bool
+	}{
+		path: defaultConfigFileName,
+	}
+
+	fs.StringVar(&raw.path, "path", raw.path, "Path to the config file to generate")
+	fs.BoolVar(&raw.force, "force", false, "Overwrite an existing config file")
+	fs.Usage = func() {
+		printInitUsage(stderr)
+	}
+
+	helpShown, err := parseCommandFlags(fs, args)
+	if err != nil {
+		return exitConfigError, err
+	}
+	if helpShown {
+		return exitOK, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return exitInterrupted, err
+	}
+
+	targetPath := strings.TrimSpace(raw.path)
+	if targetPath == "" {
+		return exitConfigError, fmt.Errorf("path cannot be empty")
+	}
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return exitConfigError, err
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		return exitConfigError, err
+	}
+	if _, err := os.Stat(absPath); err == nil && !raw.force {
+		return exitConfigError, fmt.Errorf("%s already exists; rerun with -force to overwrite", absPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return exitConfigError, err
+	}
+	if err := os.WriteFile(absPath, []byte(defaultConfigTemplate()), 0o644); err != nil {
+		return exitConfigError, err
+	}
+	writef(stderr, "Wrote %s\n", absPath)
+	return exitOK, nil
+}
+
+func runProcess(ctx context.Context, cfg ProcessConfig, encoder Encoder, ui io.Writer) (Summary, int, error) {
 	previousGOMAXPROCS := runtime.GOMAXPROCS(cfg.CPUs)
 	defer runtime.GOMAXPROCS(previousGOMAXPROCS)
 
 	if cfg.Mode != modeScan && !cfg.DryRun {
 		if err := encoder.Check(); err != nil {
-			return exitConfigError, err
+			return Summary{}, exitConfigError, err
 		}
 	}
 
-	summary, err := RunProcessCommand(ctx, cfg, encoder, stdout)
+	summary, err := RunProcessCommand(ctx, cfg, encoder, ui)
 	if err != nil {
-		return exitConfigError, err
+		return Summary{}, exitConfigError, err
 	}
 
-	return summary.ExitCode(cfg.Mode), nil
+	return summary, summary.ExitCode(cfg.Mode), nil
+}
+
+type verifyFlagValues struct {
+	rootDir      string
+	manifestPath string
+	reportPath   string
+	maxWidth     int
+	cpus         string
+}
+
+func newVerifyFlagValues() *verifyFlagValues {
+	return &verifyFlagValues{
+		maxWidth: 1200,
+		cpus:     "auto",
+	}
+}
+
+type planFlagValues struct {
+	conversionManifest string
+	releaseManifest    string
+	deployPlan         string
+	environment        string
+	baseURL            string
+	originProvider     string
+	originRoot         string
+	originPrefix       string
+	cdnProvider        string
+	immutablePrefix    string
+	mutablePrefix      string
+	verifySample       int
+}
+
+func newPlanFlagValues() *planFlagValues {
+	return &planFlagValues{
+		originProvider:  "local",
+		cdnProvider:     "noop",
+		immutablePrefix: "assets",
+		mutablePrefix:   "release",
+		verifySample:    3,
+	}
+}
+
+type publishFlagValues struct {
+	planPath   string
+	dryRunMode string
+}
+
+func newPublishFlagValues() *publishFlagValues {
+	return &publishFlagValues{
+		dryRunMode: string(publishDryRunOff),
+	}
+}
+
+type verifyDeliveryFlagValues struct {
+	planPath string
+}
+
+func newVerifyDeliveryFlagValues() *verifyDeliveryFlagValues {
+	return &verifyDeliveryFlagValues{}
 }
 
 type processFlagValues struct {
@@ -425,32 +673,32 @@ func newProcessFlagValues() *processFlagValues {
 }
 
 func bindProcessFlags(fs *flag.FlagSet, raw *processFlagValues, includeBulkFlags bool) {
-	fs.StringVar(&raw.rootDir, "dir", ".", "Root directory to scan")
-	fs.StringVar(&raw.extensions, "extensions", "jpg,jpeg,png", "Comma-separated extensions to process (subset of jpg,jpeg,png)")
-	fs.Var(&raw.include, "include", "Optional include glob (repeatable or comma-separated)")
-	fs.Var(&raw.exclude, "exclude", "Optional exclude glob (repeatable or comma-separated)")
-	fs.BoolVar(&raw.includeHidden, "include-hidden", false, "Scan dot directories/files in addition to the default visible tree")
-	fs.BoolVar(&raw.followSymlinks, "follow-symlinks", false, "Follow symlinked files/directories that stay under the root")
-	fs.Int64Var(&raw.maxFileSizeMB, "max-file-size-mb", 100, "Reject files larger than this many MiB")
-	fs.Int64Var(&raw.maxPixels, "max-pixels", 80_000_000, "Reject files whose decoded pixel count exceeds this limit")
-	fs.IntVar(&raw.maxDimension, "max-dimension", 20_000, "Reject files whose width or height exceeds this limit")
-	fs.StringVar(&raw.cpus, "cpus", "auto", "Logical CPU count to use or 'auto'")
-	fs.StringVar(&raw.reportPath, "report", "", "Optional report output path (.jsonl or .csv)")
+	fs.StringVar(&raw.rootDir, "dir", raw.rootDir, "Root directory to scan")
+	fs.StringVar(&raw.extensions, "extensions", raw.extensions, "Comma-separated extensions to process (subset of jpg,jpeg,png)")
+	fs.Var(newOverridingStringListValue(&raw.include), "include", "Optional include glob (repeatable or comma-separated)")
+	fs.Var(newOverridingStringListValue(&raw.exclude), "exclude", "Optional exclude glob (repeatable or comma-separated)")
+	fs.BoolVar(&raw.includeHidden, "include-hidden", raw.includeHidden, "Scan dot directories/files in addition to the default visible tree")
+	fs.BoolVar(&raw.followSymlinks, "follow-symlinks", raw.followSymlinks, "Follow symlinked files/directories that stay under the root")
+	fs.Int64Var(&raw.maxFileSizeMB, "max-file-size-mb", raw.maxFileSizeMB, "Reject files larger than this many MiB")
+	fs.Int64Var(&raw.maxPixels, "max-pixels", raw.maxPixels, "Reject files whose decoded pixel count exceeds this limit")
+	fs.IntVar(&raw.maxDimension, "max-dimension", raw.maxDimension, "Reject files whose width or height exceeds this limit")
+	fs.StringVar(&raw.cpus, "cpus", raw.cpus, "Logical CPU count to use or 'auto'")
+	fs.StringVar(&raw.reportPath, "report", raw.reportPath, "Optional report output path (.jsonl or .csv)")
 
 	if includeBulkFlags {
-		fs.IntVar(&raw.maxWidth, "max-width", 1200, "Resize outputs down to this width, never upscale")
-		fs.StringVar(&raw.aspectVariants, "aspect-variants", "", "Optional comma-separated aspect variants to generate, first becomes the primary output (for example \"16:9,4:3,1:1\")")
-		fs.StringVar(&raw.cropMode, "crop-mode", string(cropModeSafe), "Crop strategy for aspect variants: safe, focus")
-		fs.Float64Var(&raw.focusX, "focus-x", 0.5, "Normalized focus X used when -crop-mode=focus (0.0-1.0)")
-		fs.Float64Var(&raw.focusY, "focus-y", 0.5, "Normalized focus Y used when -crop-mode=focus (0.0-1.0)")
-		fs.IntVar(&raw.quality, "quality", 82, "WebP quality (0-100)")
-		fs.BoolVar(&raw.dryRun, "dry-run", false, "Plan the work without writing files")
-		fs.StringVar(&raw.outDir, "out-dir", "", "Optional directory used for generated .webp outputs")
-		fs.StringVar(&raw.workers, "workers", "auto", "Worker count or 'auto'")
-		fs.BoolVar(&raw.overwrite, "overwrite", false, "Legacy alias for -on-existing=overwrite")
-		fs.StringVar(&raw.onExisting, "on-existing", string(existingSkip), "Existing output policy: skip, overwrite, fail")
-		fs.StringVar(&raw.manifestPath, "manifest", "", "Optional manifest JSON path for successful conversions")
-		fs.StringVar(&raw.resumeFrom, "resume-from", "", "Optional previous report used to skip already completed files")
+		fs.IntVar(&raw.maxWidth, "max-width", raw.maxWidth, "Resize outputs down to this width, never upscale")
+		fs.StringVar(&raw.aspectVariants, "aspect-variants", raw.aspectVariants, "Optional comma-separated aspect variants to generate, first becomes the primary output (for example \"16:9,4:3,1:1\")")
+		fs.StringVar(&raw.cropMode, "crop-mode", raw.cropMode, "Crop strategy for aspect variants: safe, focus")
+		fs.Float64Var(&raw.focusX, "focus-x", raw.focusX, "Normalized focus X used when -crop-mode=focus (0.0-1.0)")
+		fs.Float64Var(&raw.focusY, "focus-y", raw.focusY, "Normalized focus Y used when -crop-mode=focus (0.0-1.0)")
+		fs.IntVar(&raw.quality, "quality", raw.quality, "WebP quality (0-100)")
+		fs.BoolVar(&raw.dryRun, "dry-run", raw.dryRun, "Plan the work without writing files")
+		fs.StringVar(&raw.outDir, "out-dir", raw.outDir, "Optional directory used for generated .webp outputs")
+		fs.StringVar(&raw.workers, "workers", raw.workers, "Worker count or 'auto'")
+		fs.BoolVar(&raw.overwrite, "overwrite", raw.overwrite, "Legacy alias for -on-existing=overwrite")
+		fs.StringVar(&raw.onExisting, "on-existing", raw.onExisting, "Existing output policy: skip, overwrite, fail")
+		fs.StringVar(&raw.manifestPath, "manifest", raw.manifestPath, "Optional manifest JSON path for successful conversions")
+		fs.StringVar(&raw.resumeFrom, "resume-from", raw.resumeFrom, "Optional previous report used to skip already completed files")
 	}
 }
 
@@ -696,6 +944,8 @@ func printRootUsage(w io.Writer) {
 	writeLine(w, "webp-guard bulk scan + bulk convert CLI")
 	writeLine(w)
 	writeLine(w, "Usage:")
+	writeLine(w, "  webp-guard help [command]")
+	writeLine(w, "  webp-guard version")
 	writeLine(w, "  webp-guard bulk [flags]")
 	writeLine(w, "  webp-guard scan [flags]")
 	writeLine(w, "  webp-guard verify -manifest ./reports/manifest.json [flags]")
@@ -703,11 +953,32 @@ func printRootUsage(w io.Writer) {
 	writeLine(w, "  webp-guard plan -conversion-manifest ./out/conversion-manifest.json -release-manifest ./out/release-manifest.json -deploy-plan ./out/deploy-plan.dev.json -env dev [flags]")
 	writeLine(w, "  webp-guard publish -plan ./out/deploy-plan.dev.json -dry-run=plan")
 	writeLine(w, "  webp-guard verify-delivery -plan ./out/deploy-plan.dev.json")
+	writeLine(w, "  webp-guard doctor [flags]")
+	writeLine(w, "  webp-guard completion <shell>")
+	writeLine(w, "  webp-guard init [flags]")
+	writeLine(w)
+	writeLine(w, "Commands:")
+	writeLine(w, "  version          Print build version information")
+	writeLine(w, "  bulk             Convert images into side-by-side .webp outputs")
+	writeLine(w, "  scan             Run the same safety checks without writing outputs")
+	writeLine(w, "  verify           Re-check conversion manifest entries on disk")
+	writeLine(w, "  resume           Continue from a previous bulk report")
+	writeLine(w, "  plan             Generate release and deploy artifacts")
+	writeLine(w, "  publish          Upload or preview a deploy plan")
+	writeLine(w, "  verify-delivery  Run read-only delivery checks from a plan")
+	writeLine(w, "  doctor           Check config discovery and local runtime readiness")
+	writeLine(w, "  completion       Generate shell completion scripts")
+	writeLine(w, "  init             Write a starter webp-guard.toml")
 	writeLine(w)
 	writeLine(w, "Legacy compatibility:")
 	writeLine(w, "  webp-guard -dir ./assets -dry-run")
 	writeLine(w)
-	writeLine(w, "Run 'webp-guard help' for this summary or use a subcommand with -h.")
+	writeLine(w, "Config:")
+	writeLine(w, "  -config ./webp-guard.toml   Load an explicit TOML config file")
+	writeLine(w, "  -no-config                  Disable auto-discovery")
+	writeLine(w, "  When omitted, webp-guard searches for webp-guard.toml from the cwd upward.")
+	writeLine(w)
+	writeLine(w, "Use 'webp-guard help <command>' or a subcommand with -h for details.")
 }
 
 func printLegacyBulkUsage(w io.Writer) {
@@ -743,6 +1014,9 @@ func printScanUsage(w io.Writer) {
 	writeLine(w, "  -max-dimension int       Reject width or height above this limit (default 20000)")
 	writeLine(w, "  -cpus string             Logical CPU count to use or 'auto' (default \"auto\")")
 	writeLine(w, "  -report string           Optional report path (.jsonl or .csv)")
+	writeLine(w, "  -json                    Emit the command summary as JSON on stdout")
+	writeLine(w, "  -config string           Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config               Disable config-file loading")
 }
 
 func printResumeUsage(w io.Writer) {
@@ -764,6 +1038,9 @@ func printVerifyUsage(w io.Writer) {
 	writeLine(w, "  -report string      Optional verification report path (.jsonl or .csv)")
 	writeLine(w, "  -max-width int      Maximum allowed output width (default 1200)")
 	writeLine(w, "  -cpus string        Logical CPU count to use or 'auto' (default \"auto\")")
+	writeLine(w, "  -json               Emit the command summary as JSON on stdout")
+	writeLine(w, "  -config string      Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config          Disable config-file loading")
 }
 
 func printPlanUsage(w io.Writer) {
@@ -784,6 +1061,9 @@ func printPlanUsage(w io.Writer) {
 	writeLine(w, "  -immutable-prefix string     Prefix used for immutable object keys (default \"assets\")")
 	writeLine(w, "  -mutable-prefix string       Prefix used for mutable object keys (default \"release\")")
 	writeLine(w, "  -verify-sample int           Number of preferred assets included in delivery verify checks (default 3)")
+	writeLine(w, "  -json                        Emit the command summary as JSON on stdout")
+	writeLine(w, "  -config string               Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config                   Disable config-file loading")
 }
 
 func printPublishUsage(w io.Writer) {
@@ -794,6 +1074,9 @@ func printPublishUsage(w io.Writer) {
 	writeLine(w, "Flags:")
 	writeLine(w, "  -plan string        Deploy plan JSON written by plan (required)")
 	writeLine(w, "  -dry-run string     Publish mode: off, plan, verify (default \"off\")")
+	writeLine(w, "  -json               Emit the command summary as JSON on stdout")
+	writeLine(w, "  -config string      Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config          Disable config-file loading")
 }
 
 func printVerifyDeliveryUsage(w io.Writer) {
@@ -803,6 +1086,84 @@ func printVerifyDeliveryUsage(w io.Writer) {
 	writeLine(w)
 	writeLine(w, "Flags:")
 	writeLine(w, "  -plan string        Deploy plan JSON written by plan (required)")
+	writeLine(w, "  -json               Emit the command summary as JSON on stdout")
+	writeLine(w, "  -config string      Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config          Disable config-file loading")
+}
+
+func printInitUsage(w io.Writer) {
+	writeLine(w, "Usage: webp-guard init [flags]")
+	writeLine(w)
+	writeLine(w, "Generate a starter webp-guard.toml in the current project.")
+	writeLine(w)
+	writeLine(w, "Flags:")
+	writeLine(w, "  -path string        Path to write (default \"webp-guard.toml\")")
+	writeLine(w, "  -force              Overwrite an existing file")
+}
+
+func printDoctorUsage(w io.Writer) {
+	writeLine(w, "Usage: webp-guard doctor [flags]")
+	writeLine(w)
+	writeLine(w, "Check config discovery, cwebp availability, temp-dir access, and CPU visibility.")
+	writeLine(w)
+	writeLine(w, "Flags:")
+	writeLine(w, "  -json               Emit the doctor report as JSON on stdout")
+	writeLine(w, "  -config string      Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config          Disable config-file loading")
+}
+
+func printCompletionUsage(w io.Writer) {
+	writeLine(w, "Usage: webp-guard completion <shell>")
+	writeLine(w)
+	writeLine(w, "Generate a shell completion script for bash, zsh, fish, or powershell.")
+	writeLine(w)
+	writeLine(w, "Flags:")
+	writeLine(w, "  -shell string       Shell name as an alternative to the positional argument")
+	writeLine(w)
+	writeLine(w, "Examples:")
+	writeLine(w, "  webp-guard completion bash > ~/.local/share/bash-completion/completions/webp-guard")
+	writeLine(w, "  webp-guard completion zsh > ~/.zsh/completions/_webp-guard")
+	writeLine(w, "  webp-guard completion fish > ~/.config/fish/completions/webp-guard.fish")
+}
+
+func runHelpCommand(args []string, stdout, _ io.Writer) (int, error) {
+	if len(args) == 0 {
+		printRootUsage(stdout)
+		return exitOK, nil
+	}
+	if len(args) > 1 {
+		return exitConfigError, fmt.Errorf("help accepts at most one command name")
+	}
+
+	switch args[0] {
+	case "help", "-h", "--help":
+		printRootUsage(stdout)
+	case "bulk":
+		printBulkUsage(stdout)
+	case "scan":
+		printScanUsage(stdout)
+	case "version":
+		printVersionUsage(stdout)
+	case "verify":
+		printVerifyUsage(stdout)
+	case "resume":
+		printResumeUsage(stdout)
+	case "plan":
+		printPlanUsage(stdout)
+	case "publish":
+		printPublishUsage(stdout)
+	case "verify-delivery":
+		printVerifyDeliveryUsage(stdout)
+	case "init":
+		printInitUsage(stdout)
+	case "doctor":
+		printDoctorUsage(stdout)
+	case "completion":
+		printCompletionUsage(stdout)
+	default:
+		return exitConfigError, fmt.Errorf("unknown help topic %q", args[0])
+	}
+	return exitOK, nil
 }
 
 func printBulkFlags(w io.Writer) {
@@ -831,4 +1192,7 @@ func printBulkFlags(w io.Writer) {
 	writeLine(w, "  -report string           Optional report path (.jsonl or .csv)")
 	writeLine(w, "  -manifest string         Optional manifest JSON path for successful conversions")
 	writeLine(w, "  -resume-from string      Optional previous report used to skip already completed files")
+	writeLine(w, "  -json                    Emit the command summary as JSON on stdout")
+	writeLine(w, "  -config string           Optional path to webp-guard.toml")
+	writeLine(w, "  -no-config               Disable config-file loading")
 }

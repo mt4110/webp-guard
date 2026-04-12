@@ -98,6 +98,17 @@ type Summary struct {
 }
 
 func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, stdout io.Writer) (Summary, error) {
+	if err := ctx.Err(); err != nil {
+		return Summary{}, err
+	}
+
+	summary := Summary{
+		Command:      string(cfg.Mode),
+		RootDir:      cfg.RootDir,
+		StartedAt:    time.Now().UTC(),
+		StatusCounts: map[string]int{},
+	}
+
 	reportWriter, err := newReportWriter(cfg.ReportPath)
 	if err != nil {
 		return Summary{}, err
@@ -112,7 +123,7 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 	}
 	defer func() {
 		if manifestWriter != nil {
-			_ = manifestWriter.Close(Summary{})
+			_ = manifestWriter.Close(summary)
 		}
 	}()
 
@@ -121,14 +132,10 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 		return Summary{}, err
 	}
 
-	summary := Summary{
-		Command:      string(cfg.Mode),
-		RootDir:      cfg.RootDir,
-		StartedAt:    time.Now().UTC(),
-		StatusCounts: map[string]int{},
-	}
-
 	writef(stdout, "Starting %s on %s (extensions=%s, cpus=%d, workers=%d)\n", cfg.Mode, cfg.RootDir, strings.Join(cfg.ExtensionList, ","), cfg.CPUs, cfg.Workers)
+
+	progress := newProgressReporterWithWriter(stdout, isInteractiveStream(stdout), string(cfg.Mode), 0)
+	defer progress.Close()
 
 	jobs := make(chan FileJob, cfg.Workers*2)
 	results := make(chan FileRecord, cfg.Workers*2)
@@ -138,15 +145,34 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 		workerWG.Add(1)
 		go func() {
 			defer workerWG.Done()
-			for job := range jobs {
-				results <- processJob(ctx, cfg, job, encoder)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case job, ok := <-jobs:
+					if !ok {
+						return
+					}
+
+					record := processJob(ctx, cfg, job, encoder)
+					if err := ctx.Err(); err != nil {
+						return
+					}
+
+					select {
+					case <-ctx.Done():
+						return
+					case results <- record:
+					}
+				}
 			}
 		}()
 	}
 
 	walkErrCh := make(chan error, 1)
 	go func() {
-		walkErrCh <- walkTree(cfg, jobs, results, resumeSet)
+		walkErrCh <- walkTree(ctx, cfg, jobs, results, resumeSet, progress)
+		progress.MarkWalkDone()
 		close(jobs)
 	}()
 
@@ -157,6 +183,7 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 
 	for record := range results {
 		summary.Add(record)
+		progress.Complete(summary)
 		if err := reportWriter.Write(record); err != nil {
 			return Summary{}, err
 		}
@@ -179,6 +206,7 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 		}
 		manifestWriter = nil
 	}
+	progress.Finish(summary)
 
 	writeLine(stdout, formatSummary(summary))
 	return summary, nil
@@ -220,29 +248,41 @@ func (s Summary) ExitCode(mode CommandMode) int {
 	return exitOK
 }
 
-func walkTree(cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord, resumeSet map[string]struct{}) error {
+func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord, resumeSet map[string]struct{}, progress *progressReporter) error {
 	root := cfg.RootDir
 	stack := []string{root}
 	visitedDirs := map[string]struct{}{root: {}}
 
 	for len(stack) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		dir := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			results <- newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, "", dir, "failed_walk", "", err)
+			if emitErr := emitWalkResult(ctx, results, newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, "", dir, "failed_walk", "", err), progress); emitErr != nil {
+				return emitErr
+			}
 			continue
 		}
 
 		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			fullPath := filepath.Join(dir, entry.Name())
 			if shouldSkipConfiguredOutputPath(cfg, fullPath) {
 				continue
 			}
 			relPath, err := filepath.Rel(root, fullPath)
 			if err != nil {
-				results <- newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, "", fullPath, "failed_path", "", err)
+				if emitErr := emitWalkResult(ctx, results, newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, "", fullPath, "failed_path", "", err), progress); emitErr != nil {
+					return emitErr
+				}
 				continue
 			}
 			relPath = filepath.ToSlash(relPath)
@@ -252,7 +292,9 @@ func walkTree(cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord,
 					continue
 				}
 				if isKnownImageExtension(entry.Name()) {
-					results <- newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, extWithoutDot(entry.Name()), "skipped_hidden")
+					if emitErr := emitWalkResult(ctx, results, newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, extWithoutDot(entry.Name()), "skipped_hidden"), progress); emitErr != nil {
+						return emitErr
+					}
 				}
 				continue
 			}
@@ -264,7 +306,9 @@ func walkTree(cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord,
 				if isKnownImageExtension(entry.Name()) {
 					record := newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, extWithoutDot(entry.Name()), "skipped_excluded")
 					record.Reason = "matched exclude glob"
-					results <- record
+					if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+						return emitErr
+					}
 				}
 				continue
 			}
@@ -273,7 +317,9 @@ func walkTree(cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord,
 				if isKnownImageExtension(entry.Name()) {
 					record := newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, extWithoutDot(entry.Name()), "skipped_not_included")
 					record.Reason = "did not match include glob"
-					results <- record
+					if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+						return emitErr
+					}
 				}
 				continue
 			}
@@ -283,31 +329,41 @@ func walkTree(cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord,
 					if isKnownImageExtension(entry.Name()) {
 						record := newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, extWithoutDot(entry.Name()), "skipped_symlink")
 						record.Reason = "symlink policy blocks traversal by default"
-						results <- record
+						if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+							return emitErr
+						}
 					}
 					continue
 				}
 
 				resolved, err := filepath.EvalSymlinks(fullPath)
 				if err != nil {
-					results <- newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_symlink", "", err)
+					if emitErr := emitWalkResult(ctx, results, newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_symlink", "", err), progress); emitErr != nil {
+						return emitErr
+					}
 					continue
 				}
 				insideRoot, err := pathWithinRoot(root, resolved)
 				if err != nil {
-					results <- newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_symlink", "", err)
+					if emitErr := emitWalkResult(ctx, results, newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_symlink", "", err), progress); emitErr != nil {
+						return emitErr
+					}
 					continue
 				}
 				if !insideRoot {
 					record := newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, extWithoutDot(entry.Name()), "rejected_symlink_escape")
 					record.Reason = "resolved path leaves the requested root"
-					results <- record
+					if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+						return emitErr
+					}
 					continue
 				}
 
 				info, err := os.Stat(fullPath)
 				if err != nil {
-					results <- newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_stat", "", err)
+					if emitErr := emitWalkResult(ctx, results, newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_stat", "", err), progress); emitErr != nil {
+						return emitErr
+					}
 					continue
 				}
 
@@ -343,31 +399,59 @@ func walkTree(cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord,
 				} else {
 					record.Reason = fmt.Sprintf("%s is not supported; supported inputs are png, jpg, and jpeg", ext)
 				}
-				results <- record
+				if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+					return emitErr
+				}
 				continue
 			}
 			if _, ok := cfg.Extensions[ext]; !ok {
 				record := newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, ext, "skipped_policy")
 				record.Reason = fmt.Sprintf("%s is outside the active extension policy", ext)
-				results <- record
+				if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+					return emitErr
+				}
 				continue
 			}
 			if _, seen := resumeSet[relPath]; seen {
 				record := newRecord(cfg.Mode, cfg.ConfigFingerprint, fullPath, relPath, ext, "skipped_resume")
 				record.Reason = "already completed in previous report"
-				results <- record
+				if emitErr := emitWalkResult(ctx, results, record, progress); emitErr != nil {
+					return emitErr
+				}
 				continue
 			}
 
-			jobs <- FileJob{
+			if err := emitJob(ctx, jobs, FileJob{
 				Path:         fullPath,
 				RelativePath: relPath,
 				Extension:    ext,
+			}, progress); err != nil {
+				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+func emitWalkResult(ctx context.Context, results chan<- FileRecord, record FileRecord, progress *progressReporter) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case results <- record:
+		progress.AddTotal(1)
+		return nil
+	}
+}
+
+func emitJob(ctx context.Context, jobs chan<- FileJob, job FileJob, progress *progressReporter) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case jobs <- job:
+		progress.AddTotal(1)
+		return nil
+	}
 }
 
 func loadResumeSet(path string, configFingerprint string) (map[string]struct{}, error) {

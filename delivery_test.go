@@ -93,7 +93,7 @@ func TestPlanPublishAndVerifyDeliveryLocalE2E(t *testing.T) {
 	deployPlanPath := filepath.Join(artifactDir, "deploy-plan.dev.json")
 
 	var planStdout bytes.Buffer
-	if err := RunPlan(context.Background(), PlanConfig{
+	if _, err := RunPlan(context.Background(), PlanConfig{
 		ConversionManifestPath: conversionManifest,
 		ReleaseManifestPath:    releaseManifest,
 		DeployPlanPath:         deployPlanPath,
@@ -259,7 +259,7 @@ func TestPlanIncludesAspectVariants(t *testing.T) {
 
 	releaseManifest := filepath.Join(artifactDir, "release-manifest.json")
 	deployPlanPath := filepath.Join(artifactDir, "deploy-plan.dev.json")
-	if err := RunPlan(context.Background(), PlanConfig{
+	if _, err := RunPlan(context.Background(), PlanConfig{
 		ConversionManifestPath: conversionManifest,
 		ReleaseManifestPath:    releaseManifest,
 		DeployPlanPath:         deployPlanPath,

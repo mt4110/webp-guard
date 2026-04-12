@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,10 +19,16 @@ import (
 )
 
 type fakeEncoder struct {
+	check  func() error
 	encode func(inputPath string, outputPath string, quality int) error
 }
 
-func (f fakeEncoder) Check() error { return nil }
+func (f fakeEncoder) Check() error {
+	if f.check != nil {
+		return f.check()
+	}
+	return nil
+}
 
 func (f fakeEncoder) Encode(_ context.Context, inputPath string, outputPath string, quality int) error {
 	return f.encode(inputPath, outputPath, quality)
@@ -638,8 +645,9 @@ func TestWalkTreeRejectsUnsupportedImageFormats(t *testing.T) {
 	cfg := testConfig(root)
 	jobs := make(chan FileJob, 1)
 	results := make(chan FileRecord, 8)
+	progress := newProgressReporterWithWriter(io.Discard, false, "test", 0)
 
-	if err := walkTree(cfg, jobs, results, map[string]struct{}{}); err != nil {
+	if err := walkTree(context.Background(), cfg, jobs, results, map[string]struct{}{}, progress); err != nil {
 		t.Fatal(err)
 	}
 	close(jobs)

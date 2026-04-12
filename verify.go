@@ -15,7 +15,9 @@ import (
 var webpDimensionsDecoder = decodeWebPDimensions
 
 func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return Summary{}, err
+	}
 
 	previousGOMAXPROCS := runtime.GOMAXPROCS(cfg.CPUs)
 	defer runtime.GOMAXPROCS(previousGOMAXPROCS)
@@ -50,7 +52,15 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 		return Summary{}, err
 	}
 
+	progress := newProgressReporterWithWriter(stdout, isInteractiveStream(stdout), string(modeVerify), len(manifest.Entries))
+	defer progress.Close()
+	progress.MarkWalkDone()
+
 	for _, entry := range manifest.Entries {
+		if err := ctx.Err(); err != nil {
+			return Summary{}, err
+		}
+
 		sourcePath, pathErr := resolveArtifactPath(sourceRoot, entry.SourcePath)
 		record := newRecord(modeVerify, "", entry.SourcePath, entry.RelativePath, extWithoutDot(entry.SourcePath), "")
 		record.OutputPath = entry.OutputPath
@@ -125,6 +135,7 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 		}
 
 		summary.Add(record)
+		progress.Complete(summary)
 		if err := reportWriter.Write(record); err != nil {
 			return Summary{}, err
 		}
@@ -132,6 +143,7 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 	}
 
 	summary.FinishedAt = time.Now().UTC()
+	progress.Finish(summary)
 	writeLine(stdout, formatSummary(summary))
 	return summary, nil
 }

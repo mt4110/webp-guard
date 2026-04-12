@@ -74,6 +74,16 @@ type DeliveryVerifySummary struct {
 	Failures int
 }
 
+type PlanSummary struct {
+	Environment         string `json:"environment"`
+	ReleaseManifestPath string `json:"release_manifest_path"`
+	DeployPlanPath      string `json:"deploy_plan_path"`
+	Assets              int    `json:"assets"`
+	ImmutableUploads    int    `json:"immutable_uploads"`
+	MutableUploads      int    `json:"mutable_uploads"`
+	VerifyChecks        int    `json:"verify_checks"`
+}
+
 type ConversionManifest struct {
 	Version     int             `json:"version"`
 	GeneratedAt string          `json:"generated_at"`
@@ -328,13 +338,15 @@ func normalizeDeliveryVerifyConfig(cfg DeliveryVerifyConfig) (DeliveryVerifyConf
 	return cfg, nil
 }
 
-func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
-	_ = ctx
+func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return PlanSummary{}, err
+	}
 
 	artifactRoot := filepath.Dir(cfg.DeployPlanPath)
 	conversionManifest, err := readConversionManifest(cfg.ConversionManifestPath)
 	if err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 
 	entries := append([]ManifestEntry(nil), conversionManifest.Entries...)
@@ -363,32 +375,36 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
 	verifyCandidates := make([]VerifyCheck, 0, cfg.VerifySample)
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return PlanSummary{}, err
+		}
+
 		sourcePath, outputPath, err := resolveConversionEntryPaths(conversionManifest, entry, "")
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 		outputVariants := manifestEntryOutputVariants(entry)
 		if len(outputVariants) == 0 {
-			return fmt.Errorf("conversion manifest entry %q has no output variants", entry.RelativePath)
+			return PlanSummary{}, fmt.Errorf("conversion manifest entry %q has no output variants", entry.RelativePath)
 		}
 
 		logicalPath, err := normalizeLogicalPath(entry.RelativePath)
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 
 		sourceExt := strings.TrimPrefix(strings.ToLower(filepath.Ext(logicalPath)), ".")
 		if sourceExt == "" {
-			return fmt.Errorf("logical path %q has no extension", logicalPath)
+			return PlanSummary{}, fmt.Errorf("logical path %q has no extension", logicalPath)
 		}
 
-		sourceHash, sourceSize, err := hashFile(sourcePath)
+		sourceHash, sourceSize, err := hashFileContext(ctx, sourcePath)
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 		sourceObjectKey, err := immutableObjectKey(immutableKeyPrefix, logicalPath, sourceExt, sourceHash)
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 
 		if releaseManifest.Build.Quality == 0 {
@@ -425,13 +441,13 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
 			PreferredFormat: "webp",
 		}
 
-		stagedSourcePath, err := stageArtifactFile(sourcePath, artifactRoot, sourceObjectKey, sourceHash)
+		stagedSourcePath, err := stageArtifactFile(ctx, sourcePath, artifactRoot, sourceObjectKey, sourceHash)
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 		stagedSourceRel, err := relativeArtifactPath(artifactRoot, stagedSourcePath)
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 
 		uploads = append(uploads, UploadRequest{
@@ -449,32 +465,32 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
 			if strings.TrimSpace(variant.OutputPath) != "" && variant.OutputPath != entry.OutputPath {
 				outputRoot, err := resolveConversionManifestOutputRoot(conversionManifest)
 				if err != nil {
-					return err
+					return PlanSummary{}, err
 				}
 				outputPath, err = resolveArtifactPath(outputRoot, variant.OutputPath)
 				if err != nil {
-					return err
+					return PlanSummary{}, err
 				}
 				if _, err := os.Stat(outputPath); err != nil {
-					return fmt.Errorf("conversion manifest output missing for %s (%s): %w", entry.RelativePath, variant.AspectRatio, err)
+					return PlanSummary{}, fmt.Errorf("conversion manifest output missing for %s (%s): %w", entry.RelativePath, variant.AspectRatio, err)
 				}
 			}
 
-			outputHash, outputSize, err := hashFile(outputPath)
+			outputHash, outputSize, err := hashFileContext(ctx, outputPath)
 			if err != nil {
-				return err
+				return PlanSummary{}, err
 			}
 			webpObjectKey, err := immutableNamedObjectKey(immutableKeyPrefix, logicalPath, "webp", variant.Name, outputHash)
 			if err != nil {
-				return err
+				return PlanSummary{}, err
 			}
-			stagedOutputPath, err := stageArtifactFile(outputPath, artifactRoot, webpObjectKey, outputHash)
+			stagedOutputPath, err := stageArtifactFile(ctx, outputPath, artifactRoot, webpObjectKey, outputHash)
 			if err != nil {
-				return err
+				return PlanSummary{}, err
 			}
 			stagedOutputRel, err := relativeArtifactPath(artifactRoot, stagedOutputPath)
 			if err != nil {
-				return err
+				return PlanSummary{}, err
 			}
 
 			asset.Variants = append(asset.Variants, ReleaseVariant{
@@ -514,13 +530,13 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
 		releaseManifest.Assets = append(releaseManifest.Assets, asset)
 	}
 
-	if err := writeJSONFile(cfg.ReleaseManifestPath, releaseManifest); err != nil {
-		return err
+	if err := writeJSONFile(ctx, cfg.ReleaseManifestPath, releaseManifest); err != nil {
+		return PlanSummary{}, err
 	}
 
-	manifestHash, _, err := hashFile(cfg.ReleaseManifestPath)
+	manifestHash, _, err := hashFileContext(ctx, cfg.ReleaseManifestPath)
 	if err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 
 	verifyChecks := make([]VerifyCheck, 0, 1+len(verifyCandidates))
@@ -536,17 +552,17 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
 
 	releaseManifestRel, err := relativeArtifactPath(artifactRoot, cfg.ReleaseManifestPath)
 	if err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 	conversionManifestRel, err := relativeArtifactPath(artifactRoot, cfg.ConversionManifestPath)
 	if err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 	originRootRel := ""
 	if cfg.OriginRoot != "" {
 		originRootRel, err = relativeArtifactPath(artifactRoot, cfg.OriginRoot)
 		if err != nil {
-			return err
+			return PlanSummary{}, err
 		}
 	}
 
@@ -592,23 +608,31 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) error {
 		deployPlan.Purge.URLs = []string{joinURL(cfg.BaseURL, mutableManifestKey)}
 	}
 
-	if err := writeJSONFile(cfg.DeployPlanPath, deployPlan); err != nil {
-		return err
+	if err := writeJSONFile(ctx, cfg.DeployPlanPath, deployPlan); err != nil {
+		return PlanSummary{}, err
 	}
 
 	if _, err := fmt.Fprintf(stdout, "Planned %d assets for %s\n", len(releaseManifest.Assets), cfg.Environment); err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 	if _, err := fmt.Fprintf(stdout, "  release manifest: %s\n", cfg.ReleaseManifestPath); err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 	if _, err := fmt.Fprintf(stdout, "  deploy plan: %s\n", cfg.DeployPlanPath); err != nil {
-		return err
+		return PlanSummary{}, err
 	}
 	if _, err := fmt.Fprintf(stdout, "  uploads: immutable=%d mutable=%d verify=%d\n", len(deployPlan.Uploads), len(deployPlan.MutableUploads), len(deployPlan.Verify.Checks)); err != nil {
-		return err
+		return PlanSummary{}, err
 	}
-	return nil
+	return PlanSummary{
+		Environment:         cfg.Environment,
+		ReleaseManifestPath: cfg.ReleaseManifestPath,
+		DeployPlanPath:      cfg.DeployPlanPath,
+		Assets:              len(releaseManifest.Assets),
+		ImmutableUploads:    len(deployPlan.Uploads),
+		MutableUploads:      len(deployPlan.MutableUploads),
+		VerifyChecks:        len(deployPlan.Verify.Checks),
+	}, nil
 }
 
 func RunPublish(ctx context.Context, cfg PublishConfig, stdout io.Writer) (PublishSummary, error) {
@@ -748,6 +772,10 @@ func executeUploads(ctx context.Context, planBaseDir string, adapter OriginAdapt
 	skipped := 0
 
 	for _, req := range uploads {
+		if err := ctx.Err(); err != nil {
+			return written, skipped, err
+		}
+
 		resolvedReq, err := resolveUploadRequest(planBaseDir, req)
 		if err != nil {
 			return written, skipped, err
@@ -817,7 +845,9 @@ func newOriginAdapter(plan DeployPlan) (OriginAdapter, error) {
 }
 
 func (a *LocalOriginAdapter) Stat(ctx context.Context, key string) (ObjectMeta, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return ObjectMeta{}, err
+	}
 
 	targetPath, err := a.targetPath(key)
 	if err != nil {
@@ -827,7 +857,7 @@ func (a *LocalOriginAdapter) Stat(ctx context.Context, key string) (ObjectMeta, 
 	if err != nil {
 		return ObjectMeta{}, err
 	}
-	hash, _, err := hashFile(targetPath)
+	hash, _, err := hashFileContext(ctx, targetPath)
 	if err != nil {
 		return ObjectMeta{}, err
 	}
@@ -839,7 +869,9 @@ func (a *LocalOriginAdapter) Stat(ctx context.Context, key string) (ObjectMeta, 
 }
 
 func (a *LocalOriginAdapter) Upload(ctx context.Context, req UploadRequest) (bool, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 
 	targetPath, err := a.targetPath(req.ObjectKey)
 	if err != nil {
@@ -878,13 +910,16 @@ func (a *LocalOriginAdapter) Upload(ctx context.Context, req UploadRequest) (boo
 	}
 	defer cleanup()
 
-	if _, err := io.Copy(tempFile, source); err != nil {
+	if _, err := copyWithContext(ctx, tempFile, source); err != nil {
 		return false, err
 	}
 	if err := tempFile.Close(); err != nil {
 		return false, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if err := os.Rename(tempFile.Name(), targetPath); err != nil {
 		return false, err
 	}
@@ -922,6 +957,10 @@ func runDeliveryVerifyPlan(ctx context.Context, deployPlan DeployPlan, stdout io
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	for _, check := range deployPlan.Verify.Checks {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+
 		ok, reason, err := executeVerifyCheck(ctx, client, deployPlan, check)
 		if err != nil {
 			return summary, err
@@ -951,7 +990,7 @@ func executeVerifyCheck(ctx context.Context, client *http.Client, plan DeployPla
 
 	switch parsed.Scheme {
 	case "file":
-		return verifyFileURL(parsed, check)
+		return verifyFileURL(ctx, parsed, check)
 	case "http", "https":
 		return verifyHTTPURL(ctx, client, check)
 	default:
@@ -959,7 +998,11 @@ func executeVerifyCheck(ctx context.Context, client *http.Client, plan DeployPla
 	}
 }
 
-func verifyFileURL(parsed *url.URL, check VerifyCheck) (bool, string, error) {
+func verifyFileURL(ctx context.Context, parsed *url.URL, check VerifyCheck) (bool, string, error) {
+	if err := ctx.Err(); err != nil {
+		return false, "", err
+	}
+
 	filePath := parsed.Path
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -983,7 +1026,7 @@ func verifyFileURL(parsed *url.URL, check VerifyCheck) (bool, string, error) {
 		return false, "cache-control is not available for file URLs", nil
 	}
 	if check.ExpectSHA256 != "" {
-		hash, _, err := hashFile(filePath)
+		hash, _, err := hashFileContext(ctx, filePath)
 		if err != nil {
 			return false, "", err
 		}
@@ -1020,7 +1063,7 @@ func verifyHTTPURL(ctx context.Context, client *http.Client, check VerifyCheck) 
 	}
 
 	if check.ExpectSHA256 != "" {
-		hash, err := hashReader(resp.Body)
+		hash, err := hashReaderContext(ctx, resp.Body)
 		if err != nil {
 			return false, "", err
 		}
@@ -1030,7 +1073,7 @@ func verifyHTTPURL(ctx context.Context, client *http.Client, check VerifyCheck) 
 		return true, "", nil
 	}
 
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+	if _, err := copyWithContext(ctx, io.Discard, resp.Body); err != nil {
 		return false, "", err
 	}
 	return true, "", nil
@@ -1094,8 +1137,36 @@ func hashFile(path string) (string, int64, error) {
 	return hash, size, nil
 }
 
+func hashFileContext(ctx context.Context, path string) (string, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	hash, size, err := hashStreamContext(ctx, file)
+	if err != nil {
+		return "", 0, err
+	}
+	return hash, size, nil
+}
+
 func hashReader(reader io.Reader) (string, error) {
 	hash, _, err := hashStream(reader)
+	if err != nil {
+		return "", err
+	}
+	return hash, nil
+}
+
+func hashReaderContext(ctx context.Context, reader io.Reader) (string, error) {
+	hash, _, err := hashStreamContext(ctx, reader)
 	if err != nil {
 		return "", err
 	}
@@ -1109,6 +1180,49 @@ func hashStream(reader io.Reader) (string, int64, error) {
 		return "", 0, err
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), written, nil
+}
+
+func hashStreamContext(ctx context.Context, reader io.Reader) (string, int64, error) {
+	hasher := sha256.New()
+	written, err := copyWithContext(ctx, hasher, reader)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), written, nil
+}
+
+func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	buf := make([]byte, 32*1024)
+	var written int64
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+
+		readBytes, readErr := src.Read(buf)
+		if readBytes > 0 {
+			writtenBytes, writeErr := dst.Write(buf[:readBytes])
+			written += int64(writtenBytes)
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if writtenBytes != readBytes {
+				return written, io.ErrShortWrite
+			}
+		}
+
+		if readErr != nil {
+			if readErr == io.EOF {
+				return written, nil
+			}
+			return written, readErr
+		}
+	}
 }
 
 func immutableObjectKey(prefix string, logicalPath string, format string, contentHash string) (string, error) {
@@ -1196,16 +1310,36 @@ func fileURL(path string) string {
 	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
 }
 
-func writeJSONFile(path string, value any) error {
+func writeJSONFile(ctx context.Context, path string, value any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(value, "", "  ")
+	tempFile, err := os.CreateTemp(filepath.Dir(path), ".webp-guard-json-*")
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+
+	cleanup := func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempFile.Name())
+	}
+	defer cleanup()
+
+	encoder := json.NewEncoder(tempFile)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return os.Rename(tempFile.Name(), path)
 }
 
 func contentTypeForExtension(ext string) string {
@@ -1286,13 +1420,17 @@ func resolveConversionManifestRoot(manifestPath string, root string) (string, er
 	return resolveArtifactPath(manifestDir, root)
 }
 
-func stageArtifactFile(sourcePath string, artifactRoot string, objectKey string, expectedHash string) (string, error) {
+func stageArtifactFile(ctx context.Context, sourcePath string, artifactRoot string, objectKey string, expectedHash string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	targetPath := filepath.Join(artifactRoot, filepath.FromSlash(objectKey))
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		return "", err
 	}
 
-	if currentHash, _, err := hashFile(targetPath); err == nil && strings.EqualFold(currentHash, expectedHash) {
+	if currentHash, _, err := hashFileContext(ctx, targetPath); err == nil && strings.EqualFold(currentHash, expectedHash) {
 		return targetPath, nil
 	} else if err != nil && !os.IsNotExist(err) {
 		return "", err
@@ -1316,10 +1454,13 @@ func stageArtifactFile(sourcePath string, artifactRoot string, objectKey string,
 	}
 	defer cleanup()
 
-	if _, err := io.Copy(tempFile, source); err != nil {
+	if _, err := copyWithContext(ctx, tempFile, source); err != nil {
 		return "", err
 	}
 	if err := tempFile.Close(); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tempFile.Name(), targetPath); err != nil {

@@ -1,0 +1,369 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label used for rehearsal archive names and embedded build metadata"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  source-validate:
+    name: Source Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Test
+        run: nix develop --command go test ./...
+
+      - name: Build CLI
+        run: nix develop --command go build -o webp-guard .
+
+  build-package:
+    name: Build And Package (${{ matrix.goos }}-${{ matrix.goarch }})
+    needs: source-validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            archive_os: darwin
+            archive_arch: arm64
+            archive_ext: tar.gz
+            artifact_name: package-darwin-arm64
+            binary_name: webp-guard
+          - goos: darwin
+            goarch: amd64
+            archive_os: darwin
+            archive_arch: amd64
+            archive_ext: tar.gz
+            artifact_name: package-darwin-amd64
+            binary_name: webp-guard
+          - goos: linux
+            goarch: amd64
+            archive_os: linux
+            archive_arch: amd64
+            archive_ext: tar.gz
+            artifact_name: package-linux-amd64
+            binary_name: webp-guard
+          - goos: windows
+            goarch: amd64
+            archive_os: windows
+            archive_arch: amd64
+            archive_ext: zip
+            artifact_name: package-windows-amd64
+            binary_name: webp-guard.exe
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Resolve build metadata
+        id: meta
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$INPUT_VERSION"
+          else
+            version="$REF_NAME"
+          fi
+          if [[ -z "$version" ]]; then
+            echo "version could not be resolved" >&2
+            exit 1
+          fi
+
+          archive="webp-guard_${version}_${{ matrix.archive_os }}_${{ matrix.archive_arch }}.${{ matrix.archive_ext }}"
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "build_date=$build_date" >> "$GITHUB_OUTPUT"
+          echo "commit=$GIT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/package
+
+          GOOS=${{ matrix.goos }} \
+          GOARCH=${{ matrix.goarch }} \
+          CGO_ENABLED=0 \
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.buildVersion=${{ steps.meta.outputs.version }} -X main.buildCommit=${{ steps.meta.outputs.commit }} -X main.buildDate=${{ steps.meta.outputs.build_date }}" \
+            -o "dist/package/${{ matrix.binary_name }}" \
+            .
+
+          cp LICENSE README.md INSTALL.md dist/package/
+
+      - name: Package tar.gz archive
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C dist/package -czf "dist/${{ steps.meta.outputs.archive }}" .
+
+      - name: Package zip archive
+        if: matrix.archive_ext == 'zip'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/package
+          zip -q "../${{ steps.meta.outputs.archive }}" "${{ matrix.binary_name }}" LICENSE README.md INSTALL.md
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ steps.meta.outputs.archive }}
+          if-no-files-found: error
+
+  checksums:
+    name: Checksums
+    needs: build-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: meta
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$INPUT_VERSION"
+          else
+            version="$REF_NAME"
+          fi
+          if [[ -z "$version" ]]; then
+            echo "version could not be resolved" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download packaged archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate checksum file
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 webp-guard_${{ steps.meta.outputs.version }}_* > "webp-guard_${{ steps.meta.outputs.version }}_checksums.txt"
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: checksums
+          path: dist/webp-guard_${{ steps.meta.outputs.version }}_checksums.txt
+          if-no-files-found: error
+
+  native-smoke:
+    name: Native Smoke (${{ matrix.name }})
+    needs:
+      - build-package
+      - checksums
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runs_on: ubuntu-latest
+            artifact_name: package-linux-amd64
+            archive_os: linux
+            archive_arch: amd64
+            archive_ext: tar.gz
+            binary_name: webp-guard
+          - name: darwin-arm64
+            runs_on: macos-14
+            artifact_name: package-darwin-arm64
+            archive_os: darwin
+            archive_arch: arm64
+            archive_ext: tar.gz
+            binary_name: webp-guard
+          - name: windows-amd64
+            runs_on: windows-latest
+            artifact_name: package-windows-amd64
+            archive_os: windows
+            archive_arch: amd64
+            archive_ext: zip
+            binary_name: webp-guard.exe
+    steps:
+      - name: Resolve version
+        id: meta
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$INPUT_VERSION"
+          else
+            version="$REF_NAME"
+          fi
+          if [[ -z "$version" ]]; then
+            echo "version could not be resolved" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download packaged archive
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifact
+
+      - name: Extract archive (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          tar -C smoke -xzf artifact/webp-guard_${{ steps.meta.outputs.version }}_${{ matrix.archive_os }}_${{ matrix.archive_arch }}.${{ matrix.archive_ext }}
+
+      - name: Extract archive (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path smoke | Out-Null
+          Expand-Archive -Path "artifact/webp-guard_${{ steps.meta.outputs.version }}_windows_amd64.zip" -DestinationPath smoke
+
+      - name: Smoke test (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./smoke/${{ matrix.binary_name }} help
+          ./smoke/${{ matrix.binary_name }} version
+          ./smoke/${{ matrix.binary_name }} scan -h
+          ./smoke/${{ matrix.binary_name }} plan -h
+
+      - name: Smoke test (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          function Invoke-Smoke([string[]]$Args) {
+            & ".\smoke\${{ matrix.binary_name }}" @Args
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+          Invoke-Smoke @("help")
+          Invoke-Smoke @("version")
+          Invoke-Smoke @("scan", "-h")
+          Invoke-Smoke @("plan", "-h")
+
+  publish-release:
+    name: Publish Release
+    if: github.event_name == 'push'
+    needs:
+      - build-package
+      - checksums
+      - native-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+
+      - name: Download checksum artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: checksums
+          path: dist
+
+      - name: Prepare release notes
+        id: notes
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          prerelease=false
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=true
+          fi
+
+          cat <<'EOF' > release-notes.md
+          ## Highlights
+          - Release archives for macOS arm64/amd64, Linux amd64, and Windows amd64
+          - Build metadata is embedded and visible through `webp-guard version`
+
+          ## Installation
+          - Download the archive for your OS
+          - Install `cwebp` separately
+          - Run `webp-guard version`
+          - See the [Installation guide](https://github.com/mt4110/webp-guard/blob/main/README.md#installation)
+
+          ## Support
+          - Tier 1: macOS arm64/amd64, Linux amd64, Windows amd64
+          - `cwebp` is required for bulk and resume when not using `-dry-run`
+          EOF
+
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          prerelease_args=()
+          if [[ "${{ steps.notes.outputs.prerelease }}" == "true" ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md \
+              "${prerelease_args[@]}"
+            gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md \
+              "${prerelease_args[@]}" \
+              dist/*
+          fi
