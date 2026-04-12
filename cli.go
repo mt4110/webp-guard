@@ -779,6 +779,11 @@ func (raw *processFlagValues) toProcessConfig(mode CommandMode) (ProcessConfig, 
 		}
 	}
 
+	manifestPath := raw.manifestPath
+	if mode == modeScan {
+		manifestPath = ""
+	}
+
 	cfg := ProcessConfig{
 		Mode:             mode,
 		RootDir:          rootDir,
@@ -805,7 +810,7 @@ func (raw *processFlagValues) toProcessConfig(mode CommandMode) (ProcessConfig, 
 		WorkersRaw:       raw.workers,
 		ExistingPolicy:   policy,
 		ReportPath:       raw.reportPath,
-		ManifestPath:     raw.manifestPath,
+		ManifestPath:     manifestPath,
 		ResumeFrom:       raw.resumeFrom,
 	}
 	cfg.ConfigFingerprint = processConfigFingerprint(cfg)

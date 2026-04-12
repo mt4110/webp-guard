@@ -552,6 +552,39 @@ func TestRunProcessCommandReturnsReportCloseError(t *testing.T) {
 	}
 }
 
+func TestRunProcessCommandDoesNotOverwriteManifestDuringScan(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "sample.jpg")
+	writeJPEG(t, source, 800, 400)
+
+	manifest := filepath.Join(t.TempDir(), "manifest.json")
+	original := []byte("{\"keep\":\"me\"}\n")
+	if err := os.WriteFile(manifest, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := testConfig(root)
+	cfg.Mode = modeScan
+	cfg.ManifestPath = manifest
+
+	var stdout bytes.Buffer
+	summary, err := RunProcessCommand(context.Background(), cfg, newDimensionAwareFakeEncoder(t, 64, nil), &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Scanned != 1 {
+		t.Fatalf("expected one scanned entry, got %#v", summary)
+	}
+
+	got, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("scan should not rewrite an existing manifest, got %q want %q", got, original)
+	}
+}
+
 func TestRunVerifyReturnsReportCloseError(t *testing.T) {
 	root := t.TempDir()
 	manifest := filepath.Join(root, "manifest.json")

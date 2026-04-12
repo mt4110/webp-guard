@@ -121,7 +121,12 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 		}
 	}()
 
-	manifestWriter, err := newManifestWriter(cfg.ManifestPath, cfg)
+	manifestPath := cfg.ManifestPath
+	if cfg.Mode == modeScan {
+		manifestPath = ""
+	}
+
+	manifestWriter, err := newManifestWriter(manifestPath, cfg)
 	if err != nil {
 		return Summary{}, err
 	}

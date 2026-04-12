@@ -441,6 +441,47 @@ func TestJoinURLPathEscapesReservedCharacters(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsEscapingVerifyObjectKey(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+			Checks: []VerifyCheck{
+				{ObjectKey: "../outside.txt"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected escaping verify object key to fail validation")
+	}
+	if !strings.Contains(err.Error(), "invalid verify object key") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
+	planBaseDir := t.TempDir()
+	originRoot := filepath.Join(planBaseDir, "origin")
+	if err := os.MkdirAll(originRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := resolveVerifyCheckURL(DeployPlan{
+		baseDir: planBaseDir,
+		Origin: OriginTarget{
+			Provider: "local",
+			RootDir:  "origin",
+		},
+	}, VerifyCheck{
+		ObjectKey: "../outside.txt",
+	})
+	if err == nil {
+		t.Fatal("expected escaping verify object key to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "invalid verify object key") {
+		t.Fatalf("unexpected resolve error: %v", err)
+	}
+}
+
 func TestRunProcessCommandHandlesLargeBatchWithOutDir(t *testing.T) {
 	root := t.TempDir()
 	outDir := filepath.Join(t.TempDir(), "bulk-out")

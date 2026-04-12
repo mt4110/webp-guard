@@ -783,6 +783,14 @@ func validateDeployPlan(plan DeployPlan) error {
 			return fmt.Errorf("invalid object key %q: %w", req.ObjectKey, err)
 		}
 	}
+	for _, check := range plan.Verify.Checks {
+		if strings.TrimSpace(check.ObjectKey) == "" {
+			continue
+		}
+		if _, err := normalizeObjectKey(check.ObjectKey); err != nil {
+			return fmt.Errorf("invalid verify object key %q: %w", check.ObjectKey, err)
+		}
+	}
 	return nil
 }
 
@@ -1552,7 +1560,11 @@ func resolveVerifyCheckURL(plan DeployPlan, check VerifyCheck) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fileURL(filepath.Join(originRoot, filepath.FromSlash(check.ObjectKey))), nil
+	cleanKey, err := normalizeObjectKey(check.ObjectKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid verify object key %q: %w", check.ObjectKey, err)
+	}
+	return fileURL(filepath.Join(originRoot, filepath.FromSlash(cleanKey))), nil
 }
 
 func describeVerifyTarget(check VerifyCheck) string {
