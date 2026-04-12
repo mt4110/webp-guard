@@ -36,29 +36,29 @@ function Invoke-WebPGuard {
         (Join-Path $RepoRoot "webp-guard")
     )
 
-    $goCommand = Get-Command go -ErrorAction SilentlyContinue
-    if ($null -ne $goCommand) {
-        Push-Location $RepoRoot
-        try {
+    Push-Location $RepoRoot
+    try {
+        $goCommand = Get-Command go -ErrorAction SilentlyContinue
+        if ($null -ne $goCommand) {
             & go run . bulk --dir $TargetDir @ArgsToForward
+            return
         }
-        finally {
-            Pop-Location
-        }
-        return
-    }
 
-    foreach ($candidate in $binaryCandidates) {
-        if (Test-Path $candidate) {
-            & $candidate bulk --dir $TargetDir @ArgsToForward
+        foreach ($candidate in $binaryCandidates) {
+            if (Test-Path $candidate) {
+                & $candidate bulk --dir $TargetDir @ArgsToForward
+                return
+            }
+        }
+
+        $pathBinary = Get-Command webp-guard -ErrorAction SilentlyContinue
+        if ($null -ne $pathBinary) {
+            & $pathBinary.Source bulk --dir $TargetDir @ArgsToForward
             return
         }
     }
-
-    $pathBinary = Get-Command webp-guard -ErrorAction SilentlyContinue
-    if ($null -ne $pathBinary) {
-        & $pathBinary.Source bulk --dir $TargetDir @ArgsToForward
-        return
+    finally {
+        Pop-Location
     }
 
     throw "webp-guard requires either Go (for go run) or a built webp-guard binary."

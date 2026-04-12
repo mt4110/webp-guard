@@ -24,8 +24,9 @@ run_cli() {
   local dir="$1"
   shift
 
+  cd "${REPO_ROOT}"
+
   if command -v go >/dev/null 2>&1; then
-    cd "${REPO_ROOT}"
     exec go run . bulk --dir "${dir}" "$@"
   fi
 

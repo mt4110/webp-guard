@@ -347,6 +347,8 @@ webp-guard -dir ./assets -dry-run
 wrapper はあくまで入口だけです。
 本体処理は必ず Go CLI が担当します。
 
+日常運用は、Windows ネイティブよりも WSL2 + Ubuntu/Debian から `scripts/bulk-webp.sh` を使う経路を推奨します。
+
 - Ubuntu / Linux: `scripts/bulk-webp.sh`
   - 第1引数に directory があればそれを優先
   - なければ `zenity` を試す
@@ -355,6 +357,9 @@ wrapper はあくまで入口だけです。
   - 第1引数に directory があればそれを優先
   - なければ folder picker を試す
   - 最後は `Read-Host` に fallback
+  - repo root 基準の path 解決には揃えているが、この branch では実機の動作確認はまだしていない
+
+forward した相対 path は、`go run` / built binary / PATH binary のどれでも repo root 基準で解決されます。
 
 例:
 

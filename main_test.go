@@ -525,6 +525,24 @@ func TestLoadResumeSetRequiresMatchingFingerprintJSONL(t *testing.T) {
 	}
 }
 
+func TestLoadResumeSetAcceptsLargeJSONLRecords(t *testing.T) {
+	root := t.TempDir()
+	report := filepath.Join(root, "resume.jsonl")
+	largeError := strings.Repeat("x", 80*1024)
+	content := `{"status":"converted","relative_path":"large.jpg","config_fingerprint":"keep","error":"` + largeError + `"}` + "\n"
+	if err := os.WriteFile(report, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	set, err := loadResumeSet(report, "keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := set["large.jpg"]; !ok {
+		t.Fatalf("expected large record to be resumable: %#v", set)
+	}
+}
+
 func TestLoadResumeSetIgnoresLegacyCSVWithoutFingerprint(t *testing.T) {
 	root := t.TempDir()
 	report := filepath.Join(root, "resume.csv")
@@ -663,6 +681,19 @@ func TestWalkTreeRejectsUnsupportedImageFormats(t *testing.T) {
 	}
 	if got["already.webp"].Status != "rejected_unsupported_format" {
 		t.Fatalf("expected already.webp to be rejected, got %#v", got["already.webp"])
+	}
+}
+
+func TestPathWithinRootRejectsParentDirectory(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Dir(root)
+
+	inside, err := pathWithinRoot(root, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inside {
+		t.Fatalf("expected parent directory %q to be outside root %q", parent, root)
 	}
 }
 

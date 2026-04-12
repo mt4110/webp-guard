@@ -502,6 +502,7 @@ func loadResumeSet(path string, configFingerprint string) (map[string]struct{}, 
 		defer closeQuietly(file)
 
 		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -651,10 +652,11 @@ func pathWithinRoot(root string, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if rel == "." {
+	cleanRel := filepath.Clean(rel)
+	if cleanRel == "." {
 		return true, nil
 	}
-	return !strings.HasPrefix(filepath.ToSlash(rel), "../"), nil
+	return cleanRel != ".." && !strings.HasPrefix(filepath.ToSlash(cleanRel), "../"), nil
 }
 
 func shouldSkipConfiguredOutputPath(cfg ProcessConfig, candidate string) bool {

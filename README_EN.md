@@ -343,6 +343,8 @@ Defaults:
 Wrapper scripts are included, but they stay thin on purpose.
 They only select the target directory and then call the Go CLI.
 
+For day-to-day use on Windows, prefer WSL2 with Ubuntu or Debian and run `scripts/bulk-webp.sh` from there instead of relying on native Windows execution.
+
 - Ubuntu / Linux: `scripts/bulk-webp.sh`
   - uses the first argument if present
   - otherwise tries `zenity`
@@ -351,6 +353,9 @@ They only select the target directory and then call the Go CLI.
   - uses the first argument if present
   - otherwise tries a folder picker
   - falls back to `Read-Host`
+  - relative path handling is aligned with the other wrapper paths, but native Windows behavior for this branch has not been verified on a real machine yet
+
+Forwarded relative paths are resolved from the repo root in every execution path, whether the wrapper uses `go run`, a built binary, or a `PATH` binary.
 
 Examples:
 

@@ -317,6 +317,62 @@ func TestPlanIncludesAspectVariants(t *testing.T) {
 	}
 }
 
+func TestNormalizePlanConfigRequiresAbsoluteHTTPBaseURL(t *testing.T) {
+	root := t.TempDir()
+	baseCfg := PlanConfig{
+		ConversionManifestPath: filepath.Join(root, "conversion-manifest.json"),
+		ReleaseManifestPath:    filepath.Join(root, "release-manifest.json"),
+		DeployPlanPath:         filepath.Join(root, "deploy-plan.dev.json"),
+		Environment:            "dev",
+		OriginProvider:         "local",
+		OriginRoot:             root,
+		CDNProvider:            "noop",
+		ImmutablePrefix:        "assets",
+		MutablePrefix:          "release",
+	}
+
+	_, err := normalizePlanConfig(baseCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = normalizePlanConfig(func() PlanConfig {
+		cfg := baseCfg
+		cfg.BaseURL = "cdn.example.com/assets"
+		return cfg
+	}())
+	if err == nil {
+		t.Fatal("expected scheme-less base-url to fail")
+	}
+	if !strings.Contains(err.Error(), "absolute http or https URL") {
+		t.Fatalf("unexpected error for scheme-less base-url: %v", err)
+	}
+
+	_, err = normalizePlanConfig(func() PlanConfig {
+		cfg := baseCfg
+		cfg.BaseURL = "ftp://cdn.example.com/assets"
+		return cfg
+	}())
+	if err == nil {
+		t.Fatal("expected non-http base-url to fail")
+	}
+	if !strings.Contains(err.Error(), "absolute http or https URL") {
+		t.Fatalf("unexpected error for ftp base-url: %v", err)
+	}
+
+	normalized, err := normalizePlanConfig(func() PlanConfig {
+		cfg := baseCfg
+		cfg.BaseURL = "https://cdn.example.com/assets"
+		return cfg
+	}())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.BaseURL != "https://cdn.example.com/assets" {
+		t.Fatalf("expected base-url to be preserved, got %q", normalized.BaseURL)
+	}
+}
+
 func TestRunProcessCommandHandlesLargeBatchWithOutDir(t *testing.T) {
 	root := t.TempDir()
 	outDir := filepath.Join(t.TempDir(), "bulk-out")

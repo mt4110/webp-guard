@@ -83,16 +83,17 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 			record.Path = sourcePath
 		}
 
-		info, err := os.Stat(sourcePath)
+		var info os.FileInfo
 		if pathErr != nil {
 			// path resolution already failed, keep that as the primary error
-		} else if err != nil {
+		} else if statInfo, err := os.Stat(sourcePath); err != nil {
 			record.Status = "verify_missing_source"
 			record.Error = err.Error()
-		} else if info.Size() != entry.SourceSizeBytes {
+		} else if statInfo.Size() != entry.SourceSizeBytes {
 			record.Status = "verify_source_changed"
-			record.Reason = fmt.Sprintf("source size changed from %d to %d", entry.SourceSizeBytes, info.Size())
+			record.Reason = fmt.Sprintf("source size changed from %d to %d", entry.SourceSizeBytes, statInfo.Size())
 		} else {
+			info = statInfo
 			record.Status = "verify_ok"
 			for index, variant := range record.OutputVariants {
 				outputPath, resolveErr := resolveArtifactPath(outputRoot, variant.OutputPath)

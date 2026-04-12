@@ -295,8 +295,12 @@ func normalizePlanConfig(cfg PlanConfig) (PlanConfig, error) {
 	}
 
 	if strings.TrimSpace(cfg.BaseURL) != "" {
-		if _, err := url.Parse(cfg.BaseURL); err != nil {
+		parsed, err := url.Parse(cfg.BaseURL)
+		if err != nil {
 			return PlanConfig{}, fmt.Errorf("invalid base-url: %w", err)
+		}
+		if !parsed.IsAbs() || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return PlanConfig{}, fmt.Errorf("invalid base-url: must be an absolute http or https URL")
 		}
 	}
 
