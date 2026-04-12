@@ -1554,11 +1554,11 @@ func validateSHA256Hex(label string, value string) error {
 }
 
 func urlPathWithinBase(baseURL *url.URL, targetURL *url.URL) bool {
-	basePath := strings.TrimSuffix(pathpkg.Clean(baseURL.EscapedPath()), "/")
+	basePath := strings.TrimSuffix(pathpkg.Clean(baseURL.Path), "/")
 	if basePath == "." {
 		basePath = ""
 	}
-	targetPath := pathpkg.Clean(targetURL.EscapedPath())
+	targetPath := pathpkg.Clean(targetURL.Path)
 	if basePath == "" || basePath == "/" {
 		return strings.HasPrefix(targetPath, "/")
 	}

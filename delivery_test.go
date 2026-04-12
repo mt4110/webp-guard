@@ -607,6 +607,26 @@ func TestValidateDeployPlanRejectsVerifyURLWhenCDNBaseURLEmpty(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsVerifyURLWithEncodedTraversal(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		CDN: CDNTarget{
+			BaseURL: "https://cdn.example.com/assets",
+		},
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+			Checks: []VerifyCheck{
+				{URL: "https://cdn.example.com/assets/%2e%2e/private/release-manifest.json"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected verify url with encoded traversal to fail validation")
+	}
+	if !strings.Contains(err.Error(), "verify url") || !strings.Contains(err.Error(), "cdn.base_url") {
+		t.Fatalf("unexpected verify url validation error: %v", err)
+	}
+}
+
 func TestRunDeliveryVerifyPlanRejectsRedirectOutsideCDNBaseURL(t *testing.T) {
 	var escapedHits atomic.Int32
 	escapedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

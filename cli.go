@@ -125,7 +125,7 @@ func (v *overridingStringListValue) Set(value string) error {
 }
 
 func runBulkCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer, legacy bool) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("bulk", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -177,7 +177,7 @@ func runBulkCommand(ctx context.Context, args []string, encoder Encoder, stdout,
 }
 
 func runScanCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("scan", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -223,7 +223,7 @@ func runScanCommand(ctx context.Context, args []string, encoder Encoder, stdout,
 }
 
 func runResumeCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("verify", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -272,7 +272,7 @@ func runResumeCommand(ctx context.Context, args []string, encoder Encoder, stdou
 }
 
 func runVerifyCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("resume", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -330,7 +330,7 @@ func runVerifyCommand(ctx context.Context, args []string, stdout, stderr io.Writ
 }
 
 func runPlanCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("plan", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -399,7 +399,7 @@ func runPlanCommand(ctx context.Context, args []string, stdout, stderr io.Writer
 }
 
 func runPublishCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("publish", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -451,7 +451,7 @@ func runPublishCommand(ctx context.Context, args []string, stdout, stderr io.Wri
 }
 
 func runVerifyDeliveryCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig(args)
+	runtimeCfg, err := loadRuntimeConfig("verify-delivery", args)
 	if err != nil {
 		return exitConfigError, err
 	}

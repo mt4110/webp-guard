@@ -97,12 +97,12 @@ type verifyDeliveryFileConfig struct {
 	Plan *string `toml:"plan"`
 }
 
-func loadRuntimeConfig(args []string) (runtimeConfig, error) {
+func loadRuntimeConfig(command string, args []string) (runtimeConfig, error) {
 	selection, err := detectConfigSelection(args)
 	if err != nil {
 		return runtimeConfig{}, err
 	}
-	if argsRequestHelp(args) {
+	if argsRequestHelp(command, args) {
 		return runtimeConfig{Selection: selection}, nil
 	}
 	if selection.NoConfig {
@@ -194,7 +194,7 @@ func detectConfigSelection(args []string) (configSelection, error) {
 	return selection, nil
 }
 
-func argsRequestHelp(args []string) bool {
+func argsRequestHelp(command string, args []string) bool {
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		switch arg {
@@ -203,14 +203,14 @@ func argsRequestHelp(args []string) bool {
 		case "-h", "--help":
 			return true
 		}
-		if flagConsumesFollowingValueForHelpScan(arg) {
+		if flagConsumesFollowingValueForHelpScan(command, arg) {
 			index++
 		}
 	}
 	return false
 }
 
-func flagConsumesFollowingValueForHelpScan(arg string) bool {
+func flagConsumesFollowingValueForHelpScan(command string, arg string) bool {
 	switch arg {
 	case "-dir", "--dir",
 		"-out-dir", "--out-dir",
@@ -245,11 +245,12 @@ func flagConsumesFollowingValueForHelpScan(arg string) bool {
 		"-immutable-prefix", "--immutable-prefix",
 		"-mutable-prefix", "--mutable-prefix",
 		"-verify-sample", "--verify-sample",
-		"-dry-run", "--dry-run",
 		"-config", "--config",
 		"-path", "--path",
 		"-shell", "--shell":
 		return true
+	case "-dry-run", "--dry-run":
+		return command == "publish"
 	default:
 		return false
 	}

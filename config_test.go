@@ -61,7 +61,7 @@ dir = "./assets"
 	}
 	t.Chdir(root)
 
-	runtimeCfg, err := loadRuntimeConfig([]string{"bulk", "--no-config=true"})
+	runtimeCfg, err := loadRuntimeConfig("bulk", []string{"bulk", "--no-config=true"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ dir = "./assets"
 	}
 	t.Chdir(root)
 
-	runtimeCfg, err := loadRuntimeConfig([]string{"bulk", "--no-config=false"})
+	runtimeCfg, err := loadRuntimeConfig("bulk", []string{"bulk", "--no-config=false"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ dir = "./assets"
 	}
 	t.Chdir(root)
 
-	runtimeCfg, err := loadRuntimeConfig([]string{"-dir", "help"})
+	runtimeCfg, err := loadRuntimeConfig("bulk", []string{"-dir", "help"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,35 +120,52 @@ dir = "./assets"
 
 func TestArgsRequestHelpSkipsConsumedFlagValues(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want bool
+		name    string
+		command string
+		args    []string
+		want    bool
 	}{
 		{
-			name: "plain help",
-			args: []string{"-h"},
-			want: true,
+			name:    "plain help",
+			command: "bulk",
+			args:    []string{"-h"},
+			want:    true,
 		},
 		{
-			name: "value for dir flag",
-			args: []string{"-dir", "-h"},
-			want: false,
+			name:    "value for dir flag",
+			command: "bulk",
+			args:    []string{"-dir", "-h"},
+			want:    false,
 		},
 		{
-			name: "value for config flag",
-			args: []string{"--config", "--help"},
-			want: false,
+			name:    "value for config flag",
+			command: "bulk",
+			args:    []string{"--config", "--help"},
+			want:    false,
 		},
 		{
-			name: "after double dash",
-			args: []string{"--", "-h"},
-			want: false,
+			name:    "bulk dry-run remains boolean",
+			command: "bulk",
+			args:    []string{"-dry-run", "-h"},
+			want:    true,
+		},
+		{
+			name:    "publish dry-run consumes value",
+			command: "publish",
+			args:    []string{"-dry-run", "-h"},
+			want:    false,
+		},
+		{
+			name:    "after double dash",
+			command: "bulk",
+			args:    []string{"--", "-h"},
+			want:    false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := argsRequestHelp(tc.args); got != tc.want {
+			if got := argsRequestHelp(tc.command, tc.args); got != tc.want {
 				t.Fatalf("argsRequestHelp(%q) = %t, want %t", tc.args, got, tc.want)
 			}
 		})
