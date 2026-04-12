@@ -206,10 +206,34 @@ func TestCompletionCommandWritesScriptToStdout(t *testing.T) {
 	}
 }
 
+func TestBashCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
+	script := renderBashCompletionScript()
+	if strings.Contains(script, `-shell|completion)`) {
+		t.Fatalf("expected completion subcommand to stop masquerading as a value flag, got %q", script)
+	}
+	if !strings.Contains(script, "-shell)") {
+		t.Fatalf("expected bash completion to keep -shell value suggestions, got %q", script)
+	}
+}
+
+func TestFishCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
+	script := renderFishCompletionScript()
+	if !strings.Contains(script, `__webp_guard_prev_arg_in completion -shell; and not string match -qr "^-" -- (commandline -ct)`) {
+		t.Fatalf("expected fish completion to gate shell suggestions to positional args, got %q", script)
+	}
+}
+
 func TestPowerShellCompletionIncludesVersionFlags(t *testing.T) {
 	script := renderPowerShellCompletionScript()
 	if !strings.Contains(script, `"version" = @("-h", "--help")`) {
 		t.Fatalf("expected version flags in PowerShell completion script, got %q", script)
+	}
+}
+
+func TestPowerShellCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
+	script := renderPowerShellCompletionScript()
+	if strings.Contains(script, `"completion" { $candidates = $shells; break }`) {
+		t.Fatalf("expected PowerShell completion to reserve shell suggestions for positional args, got %q", script)
 	}
 }
 

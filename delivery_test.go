@@ -482,6 +482,70 @@ func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
 	}
 }
 
+func TestResolveConversionEntryPathsRejectsEscapingArtifactRoots(t *testing.T) {
+	artifactDir := t.TempDir()
+	sourceRoot := filepath.Join(artifactDir, "source")
+	outputRoot := filepath.Join(artifactDir, "output")
+	if err := os.MkdirAll(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJPEG(t, filepath.Join(sourceRoot, "hero.jpg"), 800, 400)
+	if err := os.WriteFile(filepath.Join(outputRoot, "hero.webp"), []byte("webp"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(artifactDir, "outside.bin")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := ConversionManifest{
+		manifestPath: filepath.Join(artifactDir, "conversion-manifest.json"),
+		RootDir:      "source",
+		OutputDir:    "output",
+	}
+
+	tests := []struct {
+		name  string
+		entry ManifestEntry
+		want  string
+	}{
+		{
+			name: "source",
+			entry: ManifestEntry{
+				RelativePath: "hero.jpg",
+				SourcePath:   "../outside.bin",
+				OutputPath:   "hero.webp",
+			},
+			want: "source path",
+		},
+		{
+			name: "output",
+			entry: ManifestEntry{
+				RelativePath: "hero.jpg",
+				SourcePath:   "hero.jpg",
+				OutputPath:   "../outside.bin",
+			},
+			want: "output path",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := resolveConversionEntryPaths(manifest, tc.entry, "")
+			if err == nil {
+				t.Fatal("expected escaping artifact path to fail")
+			}
+			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "escapes root") {
+				t.Fatalf("unexpected escape error: %v", err)
+			}
+		})
+	}
+}
+
 func TestRunProcessCommandHandlesLargeBatchWithOutDir(t *testing.T) {
 	root := t.TempDir()
 	outDir := filepath.Join(t.TempDir(), "bulk-out")

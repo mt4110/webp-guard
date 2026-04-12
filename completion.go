@@ -199,7 +199,7 @@ _webp_guard()
 			COMPREPLY=( $(compgen -W "noop" -- "$cur") )
 			return 0
 			;;
-		-shell|completion)
+		-shell)
 			COMPREPLY=( $(compgen -W "%s" -- "$cur") )
 			return 0
 			;;
@@ -344,7 +344,7 @@ func renderFishCompletionScript() string {
 	builder.WriteString("complete -c webp-guard -n '__webp_guard_using_subcommand help' -a '")
 	builder.WriteString(strings.Join(completionCommands, " "))
 	builder.WriteString("'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in completion -shell' -a '")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in completion -shell; and not string match -qr \"^-\" -- (commandline -ct)' -a '")
 	builder.WriteString(strings.Join(completionShells, " "))
 	builder.WriteString("'\n")
 	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -crop-mode' -a 'safe focus'\n")
@@ -400,7 +400,6 @@ Register-ArgumentCompleter -CommandName webp-guard -ScriptBlock {
 
     $candidates = @()
     switch ($previous) {
-        "completion" { $candidates = $shells; break }
         "-shell" { $candidates = $shells; break }
         "-crop-mode" { $candidates = @("safe", "focus"); break }
         "-on-existing" { $candidates = @("skip", "overwrite", "fail"); break }

@@ -617,6 +617,70 @@ func TestRunVerifyReturnsReportCloseError(t *testing.T) {
 	}
 }
 
+func TestVerifyRejectsManifestEntryWithoutOutputs(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "sample.jpg")
+	writeJPEG(t, source, 800, 400)
+
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := filepath.Join(root, "manifest.json")
+	report := filepath.Join(root, "verify.jsonl")
+	manifestContent := `{
+  "version": 1,
+  "generated_at": "2026-04-10T00:00:00Z",
+  "command": "bulk",
+  "root_dir": ".",
+  "entries": [
+    {
+      "relative_path": "sample.jpg",
+      "source_path": "sample.jpg",
+      "output_path": "",
+      "source_size_bytes": ` + strconv.FormatInt(sourceInfo.Size(), 10) + `,
+      "output_size_bytes": 0,
+      "width": 800,
+      "height": 400,
+      "output_width": 0,
+      "output_height": 0,
+      "quality": 82,
+      "resized": false,
+      "orientation": 1,
+      "orientation_applied": false,
+      "saved_bytes": 0,
+      "saved_percent": 0
+    }
+  ],
+  "summary": {}
+}`
+	if err := os.WriteFile(manifest, []byte(manifestContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	summary, err := RunVerify(context.Background(), VerifyConfig{
+		ManifestPath: manifest,
+		ReportPath:   report,
+		MaxWidth:     1200,
+	}, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Failed != 1 || summary.Verified != 0 {
+		t.Fatalf("expected missing outputs to fail verification, got %#v", summary)
+	}
+
+	reportContent, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(reportContent), `"status":"verify_missing_output"`) {
+		t.Fatalf("expected verify_missing_output in report, got %s", reportContent)
+	}
+}
+
 func TestVerifyReadsManifestWithAspectVariants(t *testing.T) {
 	root := t.TempDir()
 	artifactDir := t.TempDir()

@@ -1143,11 +1143,11 @@ func resolveConversionEntryPaths(manifest ConversionManifest, entry ManifestEntr
 		return "", "", err
 	}
 
-	sourcePath, err := resolveArtifactPath(sourceRoot, entry.SourcePath)
+	sourcePath, err := resolveContainedArtifactPath(sourceRoot, entry.SourcePath, "source path")
 	if err != nil {
 		return "", "", err
 	}
-	outputPath, err := resolveArtifactPath(outputRoot, entry.OutputPath)
+	outputPath, err := resolveContainedArtifactPath(outputRoot, entry.OutputPath, "output path")
 	if err != nil {
 		return "", "", err
 	}
@@ -1460,6 +1460,31 @@ func resolveArtifactPath(baseDir string, target string) (string, error) {
 		return filepath.Clean(target), nil
 	}
 	return filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(target))), nil
+}
+
+func resolveContainedArtifactPath(root string, target string, label string) (string, error) {
+	rootPath, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+
+	resolvedPath, err := resolveArtifactPath(rootPath, target)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, err = filepath.Abs(resolvedPath)
+	if err != nil {
+		return "", err
+	}
+
+	insideRoot, err := pathWithinRoot(rootPath, resolvedPath)
+	if err != nil {
+		return "", err
+	}
+	if !insideRoot {
+		return "", fmt.Errorf("%s %q escapes root %q", label, target, rootPath)
+	}
+	return resolvedPath, nil
 }
 
 func resolveConversionManifestSourceRoot(manifest ConversionManifest, override string) (string, error) {

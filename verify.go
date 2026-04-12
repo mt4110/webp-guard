@@ -65,10 +65,10 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 			return Summary{}, err
 		}
 
-		sourcePath, pathErr := resolveArtifactPath(sourceRoot, entry.SourcePath)
+		sourcePath, pathErr := resolveContainedArtifactPath(sourceRoot, entry.SourcePath, "source path")
 		record := newRecord(modeVerify, "", entry.SourcePath, entry.RelativePath, extWithoutDot(entry.SourcePath), "")
 		record.OutputPath = entry.OutputPath
-		if resolvedOutputPath, resolveErr := resolveArtifactPath(outputRoot, entry.OutputPath); resolveErr == nil {
+		if resolvedOutputPath, resolveErr := resolveContainedArtifactPath(outputRoot, entry.OutputPath, "output path"); resolveErr == nil {
 			record.OutputPath = resolvedOutputPath
 		}
 		record.FileSizeBytes = entry.SourceSizeBytes
@@ -99,11 +99,14 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 		} else if statInfo.Size() != entry.SourceSizeBytes {
 			record.Status = "verify_source_changed"
 			record.Reason = fmt.Sprintf("source size changed from %d to %d", entry.SourceSizeBytes, statInfo.Size())
+		} else if len(record.OutputVariants) == 0 {
+			record.Status = "verify_missing_output"
+			record.Error = "manifest entry has no output path"
 		} else {
 			info = statInfo
 			record.Status = "verify_ok"
 			for index, variant := range record.OutputVariants {
-				outputPath, resolveErr := resolveArtifactPath(outputRoot, variant.OutputPath)
+				outputPath, resolveErr := resolveContainedArtifactPath(outputRoot, variant.OutputPath, "output path")
 				if resolveErr != nil {
 					record.Status = "verify_missing_output"
 					record.Error = decorateVerifyVariantError(variant, resolveErr.Error())
