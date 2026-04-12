@@ -497,6 +497,23 @@ func TestValidateDeployPlanRejectsEscapingUploadLocalPath(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsDisabledVerifyWithChecks(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		Verify: DeliveryVerifyPlan{
+			Enabled: false,
+			Checks: []VerifyCheck{
+				{ObjectKey: "assets/hero.webp"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected verify-disabled plan with checks to fail validation")
+	}
+	if !strings.Contains(err.Error(), "verify checks") || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
 	planBaseDir := t.TempDir()
 	originRoot := filepath.Join(planBaseDir, "origin")

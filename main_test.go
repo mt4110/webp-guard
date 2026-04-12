@@ -1081,6 +1081,50 @@ func TestWalkTreeSkipsOutDirReachedViaSymlinkAlias(t *testing.T) {
 	}
 }
 
+func TestWalkTreeAllowsInTreeSymlinksWhenRootIsSymlink(t *testing.T) {
+	realRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(realRoot, "images"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, filepath.Join(realRoot, "images", "hero.jpg"), 1600, 800)
+	if err := os.Symlink(filepath.Join(realRoot, "images"), filepath.Join(realRoot, "linked-images")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	rootParent := t.TempDir()
+	symlinkRoot := filepath.Join(rootParent, "current")
+	if err := os.Symlink(realRoot, symlinkRoot); err != nil {
+		t.Skipf("root symlink unavailable: %v", err)
+	}
+
+	cfg := testConfig(symlinkRoot)
+	cfg.FollowSymlinks = true
+
+	jobs := make(chan FileJob, 8)
+	results := make(chan FileRecord, 8)
+	progress := newProgressReporterWithWriter(io.Discard, false, "test", 0)
+
+	if err := walkTree(context.Background(), cfg, jobs, results, map[string]struct{}{}, progress); err != nil {
+		t.Fatal(err)
+	}
+	close(jobs)
+	close(results)
+
+	var gotJobs []FileJob
+	for job := range jobs {
+		gotJobs = append(gotJobs, job)
+	}
+	if len(gotJobs) != 1 {
+		t.Fatalf("expected one queued job after following in-tree symlink, got %#v", gotJobs)
+	}
+
+	for record := range results {
+		if record.Status == "rejected_symlink_escape" {
+			t.Fatalf("expected symlink under symlinked root to stay inside tree, got %#v", record)
+		}
+	}
+}
+
 func TestPathWithinRootRejectsParentDirectory(t *testing.T) {
 	root := t.TempDir()
 	parent := filepath.Dir(root)

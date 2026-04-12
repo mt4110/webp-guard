@@ -779,6 +779,9 @@ func readDeployPlan(path string) (DeployPlan, error) {
 }
 
 func validateDeployPlan(plan DeployPlan) error {
+	if !plan.Verify.Enabled && len(plan.Verify.Checks) > 0 {
+		return fmt.Errorf("deploy plan has verify checks but verify is disabled")
+	}
 	for _, req := range append(append([]UploadRequest{}, plan.Uploads...), plan.MutableUploads...) {
 		if strings.TrimSpace(req.LocalPath) == "" {
 			return fmt.Errorf("deploy plan contains upload with empty local_path")
@@ -974,6 +977,9 @@ func (a *LocalOriginAdapter) targetPath(key string) (string, error) {
 func runDeliveryVerifyPlan(ctx context.Context, deployPlan DeployPlan, stdout io.Writer) (DeliveryVerifySummary, error) {
 	summary := DeliveryVerifySummary{Total: len(deployPlan.Verify.Checks)}
 	if !deployPlan.Verify.Enabled {
+		if len(deployPlan.Verify.Checks) > 0 {
+			return summary, fmt.Errorf("delivery verify is disabled but %d checks are present", len(deployPlan.Verify.Checks))
+		}
 		writeLine(stdout, "Delivery verify is disabled in this plan")
 		return summary, nil
 	}

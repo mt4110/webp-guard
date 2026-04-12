@@ -266,6 +266,10 @@ func (s Summary) ExitCode(mode CommandMode) int {
 
 func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord, resumeSet map[string]struct{}, progress *progressReporter) error {
 	root := cfg.RootDir
+	containmentRoot := root
+	if cfg.FollowSymlinks {
+		containmentRoot = directoryVisitKey(root, true)
+	}
 	stack := []string{root}
 	visitedDirs := map[string]struct{}{directoryVisitKey(root, cfg.FollowSymlinks): {}}
 
@@ -359,7 +363,7 @@ func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, resul
 					}
 					continue
 				}
-				insideRoot, err := pathWithinRoot(root, resolved)
+				insideRoot, err := pathWithinRoot(containmentRoot, resolved)
 				if err != nil {
 					if emitErr := emitWalkResult(ctx, results, newSystemRecord(cfg.Mode, cfg.ConfigFingerprint, relPath, fullPath, "failed_symlink", "", err), progress); emitErr != nil {
 						return emitErr
