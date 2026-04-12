@@ -86,6 +86,13 @@ function Resolve-TargetDirectory {
     }
 
     $candidate = $Path
+    if ($candidate -eq "~") {
+        $candidate = $HOME
+    }
+    elseif ($candidate -match '^~[\\/]') {
+        $candidate = Join-Path $HOME $candidate.Substring(2)
+    }
+
     if (-not [System.IO.Path]::IsPathRooted($candidate)) {
         $candidate = Join-Path $RepoRoot $candidate
     }

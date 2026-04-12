@@ -539,6 +539,20 @@ func TestValidateDeployPlanRejectsDisabledVerifyWithChecks(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsEnabledVerifyWithoutChecks(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+		},
+	})
+	if err == nil {
+		t.Fatal("expected verify-enabled plan without checks to fail validation")
+	}
+	if !strings.Contains(err.Error(), "enables verify") || !strings.Contains(err.Error(), "no checks") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestValidateDeployPlanRejectsEscapingOriginRootDir(t *testing.T) {
 	planBaseDir := t.TempDir()
 	err := validateDeployPlan(DeployPlan{
@@ -832,6 +846,79 @@ func TestResolveConversionEntryPathsRejectsEscapingArtifactRoots(t *testing.T) {
 				t.Fatalf("unexpected escape error: %v", err)
 			}
 		})
+	}
+}
+
+func TestRunPlanRejectsVariantOutputPathOutsideManifestRoot(t *testing.T) {
+	artifactDir := filepath.Join(t.TempDir(), "artifact")
+	sourceRoot := filepath.Join(artifactDir, "source")
+	outputRoot := filepath.Join(artifactDir, "output")
+	originRoot := filepath.Join(artifactDir, "origin")
+	if err := os.MkdirAll(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJPEG(t, filepath.Join(sourceRoot, "hero.jpg"), 1600, 900)
+	if err := os.WriteFile(filepath.Join(outputRoot, "hero.webp"), []byte("primary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "outside.webp"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	conversionManifestPath := filepath.Join(artifactDir, "conversion-manifest.json")
+	err := writeJSONFile(context.Background(), conversionManifestPath, ConversionManifest{
+		Version:     1,
+		GeneratedAt: "2026-04-13T00:00:00Z",
+		Command:     "bulk",
+		RootDir:     "source",
+		OutputDir:   "output",
+		Entries: []ManifestEntry{
+			{
+				RelativePath: "hero.jpg",
+				SourcePath:   "hero.jpg",
+				OutputPath:   "hero.webp",
+				Width:        1600,
+				Height:       900,
+				OutputWidth:  1600,
+				OutputHeight: 900,
+				Quality:      75,
+				OutputVariants: []OutputVariantInfo{
+					{
+						Name:         "16x9",
+						Usage:        variantUsagePrimary,
+						AspectRatio:  "16:9",
+						OutputPath:   "../outside.webp",
+						OutputWidth:  1600,
+						OutputHeight: 900,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = RunPlan(context.Background(), PlanConfig{
+		ConversionManifestPath: conversionManifestPath,
+		ReleaseManifestPath:    filepath.Join(artifactDir, "release-manifest.json"),
+		DeployPlanPath:         filepath.Join(artifactDir, "deploy-plan.dev.json"),
+		Environment:            "dev",
+		OriginProvider:         "local",
+		OriginRoot:             originRoot,
+		CDNProvider:            "noop",
+		ImmutablePrefix:        "assets",
+		MutablePrefix:          "release",
+	}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected variant output_path outside output root to fail")
+	}
+	if !strings.Contains(err.Error(), "variant output path") || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("unexpected variant output path error: %v", err)
 	}
 }
 

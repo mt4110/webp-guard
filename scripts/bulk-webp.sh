@@ -20,8 +20,25 @@ pick_directory() {
   printf '%s' "${selected}"
 }
 
+expand_home_dir() {
+  local dir="$1"
+
+  case "${dir}" in
+    "~")
+      printf '%s' "${HOME}"
+      ;;
+    "~/"*)
+      printf '%s' "${HOME}/${dir#~/}"
+      ;;
+    *)
+      printf '%s' "${dir}"
+      ;;
+  esac
+}
+
 resolve_target_dir() {
   local dir="$1"
+  dir="$(expand_home_dir "${dir}")"
 
   if [[ "${dir}" != /* ]]; then
     dir="${REPO_ROOT}/${dir}"

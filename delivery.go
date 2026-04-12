@@ -497,7 +497,7 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 				if err != nil {
 					return PlanSummary{}, err
 				}
-				outputPath, err = resolveArtifactPath(outputRoot, variant.OutputPath)
+				outputPath, err = resolveContainedArtifactPath(outputRoot, variant.OutputPath, "variant output path")
 				if err != nil {
 					return PlanSummary{}, err
 				}
@@ -786,6 +786,9 @@ func readDeployPlan(path string) (DeployPlan, error) {
 }
 
 func validateDeployPlan(plan DeployPlan) error {
+	if plan.Verify.Enabled && len(plan.Verify.Checks) == 0 {
+		return fmt.Errorf("deploy plan enables verify but has no checks")
+	}
 	if !plan.Verify.Enabled && len(plan.Verify.Checks) > 0 {
 		return fmt.Errorf("deploy plan has verify checks but verify is disabled")
 	}
