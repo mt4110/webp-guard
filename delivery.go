@@ -968,19 +968,7 @@ func (a *LocalOriginAdapter) targetPath(key string) (string, error) {
 		return "", err
 	}
 
-	targetPath := filepath.Join(a.RootDir, filepath.FromSlash(cleanKey))
-	absTarget, err := filepath.Abs(targetPath)
-	if err != nil {
-		return "", err
-	}
-	insideRoot, err := pathWithinRoot(a.RootDir, absTarget)
-	if err != nil {
-		return "", err
-	}
-	if !insideRoot {
-		return "", fmt.Errorf("object key %q escapes local origin root", key)
-	}
-	return absTarget, nil
+	return resolveContainedArtifactPath(a.RootDir, filepath.FromSlash(cleanKey), "object key")
 }
 
 func runDeliveryVerifyPlan(ctx context.Context, deployPlan DeployPlan, stdout io.Writer) (DeliveryVerifySummary, error) {
@@ -1476,24 +1464,68 @@ func resolveContainedArtifactPath(root string, target string, label string) (str
 	if err != nil {
 		return "", err
 	}
-
-	resolvedPath, err := resolveArtifactPath(rootPath, target)
-	if err != nil {
-		return "", err
-	}
-	resolvedPath, err = filepath.Abs(resolvedPath)
+	resolvedRoot, err := resolvePathWithExistingSymlinks(rootPath)
 	if err != nil {
 		return "", err
 	}
 
-	insideRoot, err := pathWithinRoot(rootPath, resolvedPath)
+	targetPath, err := resolveArtifactPath(rootPath, target)
+	if err != nil {
+		return "", err
+	}
+	targetPath, err = filepath.Abs(targetPath)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, err := resolvePathWithExistingSymlinks(targetPath)
+	if err != nil {
+		return "", err
+	}
+
+	insideRoot, err := pathWithinRoot(resolvedRoot, resolvedPath)
 	if err != nil {
 		return "", err
 	}
 	if !insideRoot {
 		return "", fmt.Errorf("%s %q escapes root %q", label, target, rootPath)
 	}
-	return resolvedPath, nil
+	return targetPath, nil
+}
+
+func resolvePathWithExistingSymlinks(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	absPath = filepath.Clean(absPath)
+
+	resolvedPrefix := absPath
+	missingParts := make([]string, 0, 4)
+	for {
+		_, err := os.Lstat(resolvedPrefix)
+		if err == nil {
+			resolvedPrefix, err = filepath.EvalSymlinks(resolvedPrefix)
+			if err != nil {
+				return "", err
+			}
+			break
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+
+		parent := filepath.Dir(resolvedPrefix)
+		if parent == resolvedPrefix {
+			break
+		}
+		missingParts = append(missingParts, filepath.Base(resolvedPrefix))
+		resolvedPrefix = parent
+	}
+
+	for i := len(missingParts) - 1; i >= 0; i-- {
+		resolvedPrefix = filepath.Join(resolvedPrefix, missingParts[i])
+	}
+	return filepath.Clean(resolvedPrefix), nil
 }
 
 func resolveConversionManifestSourceRoot(manifest ConversionManifest, override string) (string, error) {
@@ -1598,7 +1630,11 @@ func resolveVerifyCheckURL(plan DeployPlan, check VerifyCheck) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid verify object key %q: %w", check.ObjectKey, err)
 	}
-	return fileURL(filepath.Join(originRoot, filepath.FromSlash(cleanKey))), nil
+	resolvedPath, err := resolveContainedArtifactPath(originRoot, filepath.FromSlash(cleanKey), "verify object key")
+	if err != nil {
+		return "", err
+	}
+	return fileURL(resolvedPath), nil
 }
 
 func describeVerifyTarget(check VerifyCheck) string {

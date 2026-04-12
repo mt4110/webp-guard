@@ -521,6 +521,34 @@ func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
 	}
 }
 
+func TestResolveVerifyCheckURLRejectsSymlinkEscape(t *testing.T) {
+	planBaseDir := t.TempDir()
+	originRoot := filepath.Join(planBaseDir, "origin")
+	outsideRoot := t.TempDir()
+	if err := os.MkdirAll(originRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideRoot, filepath.Join(originRoot, "assets")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := resolveVerifyCheckURL(DeployPlan{
+		baseDir: planBaseDir,
+		Origin: OriginTarget{
+			Provider: "local",
+			RootDir:  "origin",
+		},
+	}, VerifyCheck{
+		ObjectKey: "assets/outside.txt",
+	})
+	if err == nil {
+		t.Fatal("expected symlink verify object key to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "verify object key") || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("unexpected symlink resolve error: %v", err)
+	}
+}
+
 func TestResolveUploadRequestRejectsEscapingLocalPath(t *testing.T) {
 	planBaseDir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.bin")
@@ -537,6 +565,42 @@ func TestResolveUploadRequestRejectsEscapingLocalPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "upload local_path") || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("unexpected resolve error: %v", err)
+	}
+}
+
+func TestResolveUploadRequestRejectsSymlinkEscape(t *testing.T) {
+	planBaseDir := t.TempDir()
+	outsideRoot := t.TempDir()
+	if err := os.Symlink(outsideRoot, filepath.Join(planBaseDir, "artifacts")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := resolveUploadRequest(planBaseDir, UploadRequest{
+		LocalPath: "artifacts/outside.bin",
+		ObjectKey: "assets/hero.webp",
+	})
+	if err == nil {
+		t.Fatal("expected symlinked upload local_path to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "upload local_path") || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("unexpected resolve error: %v", err)
+	}
+}
+
+func TestLocalOriginAdapterRejectsSymlinkEscapeTargetPath(t *testing.T) {
+	originRoot := t.TempDir()
+	outsideRoot := t.TempDir()
+	if err := os.Symlink(outsideRoot, filepath.Join(originRoot, "assets")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	adapter := &LocalOriginAdapter{RootDir: originRoot}
+	_, err := adapter.targetPath("assets/outside.txt")
+	if err == nil {
+		t.Fatal("expected symlinked object key to fail resolution")
+	}
+	if !strings.Contains(err.Error(), "object key") || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("unexpected target path error: %v", err)
 	}
 }
 
