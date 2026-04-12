@@ -32,7 +32,7 @@ func main() {
 
 func run(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer) (int, error) {
 	if len(args) == 0 {
-		return runBulkCommand(ctx, args, encoder, stdout, stderr, true)
+		return runHelpCommand(nil, stdout, stderr)
 	}
 
 	switch args[0] {

@@ -17,18 +17,20 @@
 
 まず試すなら、[GitHub Releases](https://github.com/mt4110/webp-guard/releases/latest) から archive を取り、`webp-guard` を `PATH` に置く経路を正本にします。
 
-`cwebp` は別途必要です。
-
-- macOS: `brew install webp`
-- Ubuntu / Debian: `sudo apt-get update && sudo apt-get install -y webp`
-- Windows: [Google の WebP utilities](https://developers.google.com/speed/webp/download) を取得して、展開した `bin` を `PATH` に追加
-
-導入確認:
+最初の確認は `cwebp` なしで進められます。
 
 ```bash
 webp-guard version
 webp-guard help
+webp-guard scan --dir ./assets
+webp-guard bulk --dir ./assets --dry-run
 ```
+
+実変換に進む前に `cwebp` を入れます。
+
+- macOS: `brew install webp`
+- Ubuntu / Debian: `sudo apt-get update && sudo apt-get install -y webp`
+- Windows: [Google の WebP utilities](https://developers.google.com/speed/webp/download) を取得して、展開した `bin` を `PATH` に追加
 
 ### Go Install
 
@@ -38,7 +40,7 @@ Go toolchain を自前で管理しているならこちらです。
 go install github.com/mt4110/webp-guard@latest
 ```
 
-この場合も `cwebp` は別途必要です。
+この場合も、実変換に進む前に `cwebp` を別途入れます。
 
 ### Nix
 
@@ -74,6 +76,8 @@ go build -o webp-guard .
 
 ## Quick Start
 
+### まず1回通す
+
 最初は `cwebp` がなくても進められるところから始めます。
 
 ```bash
@@ -87,6 +91,21 @@ webp-guard bulk \
   --dry-run \
   --report ./out/bulk-plan.jsonl
 ```
+
+### config-first で短く使う
+
+フラグを毎回書きたくないなら、最初に config を作るのが最短です。
+
+```bash
+webp-guard init
+# webp-guard.toml を project に合わせて調整
+
+webp-guard bulk --dry-run
+webp-guard bulk
+webp-guard verify
+```
+
+`bulk` や `verify` だけで回せる状態まで持っていくと、日常運用の手順がかなり短くなります。
 
 ## 現状 repo の理解
 
@@ -258,7 +277,7 @@ webp-guard -dir ./assets -dry-run
 - 指定しなければ、現在の working directory から親ディレクトリ方向へ自動探索
 - config 内の相対 path は、実行時の cwd ではなく config file 自身の場所を基準に解決
 - 優先順位は `CLI flags > webp-guard.toml > built-in defaults`
-- `webp-guard init` で starter config を生成
+- 毎回長い flag を書きたくないなら、`webp-guard init` で starter config を生成してから詰めるのが最短
 
 ## Security Scan 方針
 

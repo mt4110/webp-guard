@@ -17,18 +17,20 @@ Related design note:
 
 For the first run, the primary path is to download an archive from [GitHub Releases](https://github.com/mt4110/webp-guard/releases/latest) and place `webp-guard` on your `PATH`.
 
-`cwebp` is still a separate runtime dependency.
-
-- macOS: `brew install webp`
-- Ubuntu / Debian: `sudo apt-get update && sudo apt-get install -y webp`
-- Windows: download the [Google WebP utilities](https://developers.google.com/speed/webp/download) and add the extracted `bin` directory to `PATH`
-
-Sanity check:
+The first checks can happen before `cwebp` is installed.
 
 ```bash
 webp-guard version
 webp-guard help
+webp-guard scan --dir ./assets
+webp-guard bulk --dir ./assets --dry-run
 ```
+
+Install `cwebp` right before you move on to real conversions.
+
+- macOS: `brew install webp`
+- Ubuntu / Debian: `sudo apt-get update && sudo apt-get install -y webp`
+- Windows: download the [Google WebP utilities](https://developers.google.com/speed/webp/download) and add the extracted `bin` directory to `PATH`
 
 ### Go Install
 
@@ -38,7 +40,7 @@ Use this when you already manage your own Go toolchain.
 go install github.com/mt4110/webp-guard@latest
 ```
 
-`cwebp` is still required separately.
+`cwebp` is still required separately for real conversions.
 
 ### Nix
 
@@ -74,6 +76,8 @@ go build -o webp-guard .
 
 ## Quick Start
 
+### First pass
+
 Start with the path that still works before `cwebp` is installed.
 
 ```bash
@@ -87,6 +91,21 @@ webp-guard bulk \
   --dry-run \
   --report ./out/bulk-plan.jsonl
 ```
+
+### Config-first, shorter daily flow
+
+If you do not want to repeat long flag lists, generating config first is the shortest path.
+
+```bash
+webp-guard init
+# adjust webp-guard.toml for the project
+
+webp-guard bulk --dry-run
+webp-guard bulk
+webp-guard verify
+```
+
+Once the config matches the project, day-to-day runs can stay as short as `webp-guard bulk` and `webp-guard verify`.
 
 ## Current Repo Understanding
 
@@ -258,7 +277,7 @@ webp-guard -dir ./assets -dry-run
 - When omitted, `webp-guard` searches upward from the current working directory
 - Relative paths inside the config are resolved relative to the config file itself, not the runtime cwd
 - Precedence is `CLI flags > webp-guard.toml > built-in defaults`
-- `webp-guard init` writes a starter config
+- If you want to avoid repeating long flag lists, the shortest path is to start with `webp-guard init` and refine the starter config
 
 ## Security Scan Policy
 

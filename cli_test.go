@@ -221,6 +221,27 @@ func TestHelpCommandPrintsSubcommandUsage(t *testing.T) {
 	}
 }
 
+func TestRunWithoutArgsPrintsRootHelp(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code, err := run(context.Background(), []string{}, fakeEncoder{}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != exitOK {
+		t.Fatalf("expected exitOK, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), "Usage:") {
+		t.Fatalf("expected root help on stdout, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Starting bulk") || strings.Contains(stderr.String(), "Starting bulk") {
+		t.Fatalf("expected no-args invocation to show help instead of starting bulk, stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no-args help to keep stderr empty, got %q", stderr.String())
+	}
+}
+
 func TestVersionCommandPrintsBuildMetadata(t *testing.T) {
 	originalVersion := buildVersion
 	originalCommit := buildCommit
