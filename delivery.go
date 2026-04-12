@@ -839,6 +839,9 @@ func validateDeployPlan(plan DeployPlan) error {
 				return fmt.Errorf("invalid verify expect_sha256 %q: %w", check.ExpectSHA256, err)
 			}
 		}
+		if !verifyCheckHasAssertions(check) {
+			return fmt.Errorf("verify check for %s has no assertions", describeVerifyTarget(check))
+		}
 	}
 	return nil
 }
@@ -1551,6 +1554,13 @@ func validateSHA256Hex(label string, value string) error {
 		return fmt.Errorf("%s must be valid hex: %w", label, err)
 	}
 	return nil
+}
+
+func verifyCheckHasAssertions(check VerifyCheck) bool {
+	return check.ExpectStatus != 0 ||
+		strings.TrimSpace(check.ExpectContentType) != "" ||
+		strings.TrimSpace(check.ExpectCacheControl) != "" ||
+		strings.TrimSpace(check.ExpectSHA256) != ""
 }
 
 func urlPathWithinBase(baseURL *url.URL, targetURL *url.URL) bool {

@@ -553,6 +553,23 @@ func TestValidateDeployPlanRejectsEnabledVerifyWithoutChecks(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsVerifyCheckWithoutAssertions(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+			Checks: []VerifyCheck{
+				{ObjectKey: "assets/hero.webp"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected verify check without assertions to fail validation")
+	}
+	if !strings.Contains(err.Error(), "has no assertions") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func TestValidateDeployPlanRejectsEscapingOriginRootDir(t *testing.T) {
 	planBaseDir := t.TempDir()
 	err := validateDeployPlan(DeployPlan{
@@ -647,7 +664,10 @@ func TestRunDeliveryVerifyPlanRejectsRedirectOutsideCDNBaseURL(t *testing.T) {
 		Verify: DeliveryVerifyPlan{
 			Enabled: true,
 			Checks: []VerifyCheck{
-				{URL: redirectServer.URL + "/assets/hero.webp"},
+				{
+					URL:          redirectServer.URL + "/assets/hero.webp",
+					ExpectStatus: http.StatusOK,
+				},
 			},
 		},
 	}
