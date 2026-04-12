@@ -41,20 +41,20 @@ function Invoke-WebPGuard {
         $goCommand = Get-Command go -ErrorAction SilentlyContinue
         if ($null -ne $goCommand) {
             & go run . bulk --dir $TargetDir @ArgsToForward
-            return
+            return $LASTEXITCODE
         }
 
         foreach ($candidate in $binaryCandidates) {
             if (Test-Path $candidate) {
                 & $candidate bulk --dir $TargetDir @ArgsToForward
-                return
+                return $LASTEXITCODE
             }
         }
 
         $pathBinary = Get-Command webp-guard -ErrorAction SilentlyContinue
         if ($null -ne $pathBinary) {
             & $pathBinary.Source bulk --dir $TargetDir @ArgsToForward
-            return
+            return $LASTEXITCODE
         }
     }
     finally {
@@ -80,4 +80,5 @@ if (-not (Test-Path $Directory -PathType Container)) {
     throw "Directory not found: $Directory"
 }
 
-Invoke-WebPGuard -TargetDir $Directory -ArgsToForward $ForwardArgs
+$exitCode = Invoke-WebPGuard -TargetDir $Directory -ArgsToForward $ForwardArgs
+exit $exitCode

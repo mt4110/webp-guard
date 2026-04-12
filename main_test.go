@@ -418,6 +418,83 @@ func TestVerifyReadsManifest(t *testing.T) {
 	}
 }
 
+func TestVerifyRejectsEqualSizedOutput(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "sample.jpg")
+	outputDir := filepath.Join(root, "generated")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, source, 800, 400)
+
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output := filepath.Join(outputDir, "sample.webp")
+	if err := os.WriteFile(output, bytes.Repeat([]byte("w"), int(sourceInfo.Size())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	manifest := filepath.Join(root, "manifest.json")
+	report := filepath.Join(root, "verify.jsonl")
+	manifestContent := `{
+  "version": 1,
+  "generated_at": "2026-04-10T00:00:00Z",
+  "command": "bulk",
+  "root_dir": ".",
+  "output_dir": "generated",
+  "entries": [
+    {
+      "relative_path": "sample.jpg",
+      "source_path": "sample.jpg",
+      "output_path": "sample.webp",
+      "source_size_bytes": ` + strconv.FormatInt(sourceInfo.Size(), 10) + `,
+      "output_size_bytes": ` + strconv.FormatInt(sourceInfo.Size(), 10) + `,
+      "width": 800,
+      "height": 400,
+      "output_width": 1,
+      "output_height": 1,
+      "quality": 82,
+      "resized": false,
+      "orientation": 1,
+      "orientation_applied": false,
+      "saved_bytes": 0,
+      "saved_percent": 0
+    }
+  ],
+  "summary": {}
+}`
+	if err := os.WriteFile(manifest, []byte(manifestContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubWebPDimensions(t, func(path string) (int, int, error) {
+		return 1, 1, nil
+	})
+
+	var stdout bytes.Buffer
+	summary, err := RunVerify(context.Background(), VerifyConfig{
+		ManifestPath: manifest,
+		ReportPath:   report,
+		MaxWidth:     1200,
+	}, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Failed != 1 || summary.Verified != 0 {
+		t.Fatalf("expected equal-sized output to fail verification, got %#v", summary)
+	}
+
+	reportContent, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(reportContent), `"status":"verify_size_regression"`) {
+		t.Fatalf("expected verify_size_regression in report, got %s", reportContent)
+	}
+}
+
 func TestVerifyReadsManifestWithAspectVariants(t *testing.T) {
 	root := t.TempDir()
 	artifactDir := t.TempDir()
@@ -681,6 +758,45 @@ func TestWalkTreeRejectsUnsupportedImageFormats(t *testing.T) {
 	}
 	if got["already.webp"].Status != "rejected_unsupported_format" {
 		t.Fatalf("expected already.webp to be rejected, got %#v", got["already.webp"])
+	}
+}
+
+func TestWalkTreeDedupesDirectoriesReachedViaSymlink(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "images")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, filepath.Join(realDir, "hero.jpg"), 1600, 800)
+
+	aliasDir := filepath.Join(root, "alias")
+	if err := os.Symlink(realDir, aliasDir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cfg := testConfig(root)
+	cfg.FollowSymlinks = true
+
+	jobs := make(chan FileJob, 8)
+	results := make(chan FileRecord, 8)
+	progress := newProgressReporterWithWriter(io.Discard, false, "test", 0)
+
+	if err := walkTree(context.Background(), cfg, jobs, results, map[string]struct{}{}, progress); err != nil {
+		t.Fatal(err)
+	}
+	close(jobs)
+	close(results)
+
+	var got []FileJob
+	for job := range jobs {
+		got = append(got, job)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected exactly one job after deduping symlinked directory, got %#v", got)
+	}
+	if got[0].RelativePath != "alias/hero.jpg" && got[0].RelativePath != "images/hero.jpg" {
+		t.Fatalf("unexpected walked path %#v", got[0])
 	}
 }
 

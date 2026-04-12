@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -60,6 +61,32 @@ func TestRunProcessCommandUsesOutDirAndSkipsNestedOutputTree(t *testing.T) {
 	}
 	if strings.Contains(string(manifestBytes), filepath.ToSlash(outDir)) {
 		t.Fatalf("conversion manifest should not contain absolute output root")
+	}
+}
+
+func TestLocalPathFromFileURLPreservesWindowsDriveHost(t *testing.T) {
+	parsed, err := url.Parse("file://C:/artifacts/release-manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := localPathFromFileURL(parsed)
+	want := filepath.FromSlash("C:/artifacts/release-manifest.json")
+	if got != want {
+		t.Fatalf("expected Windows drive to be preserved, got %q want %q", got, want)
+	}
+}
+
+func TestLocalPathFromFileURLPreservesWindowsDrivePath(t *testing.T) {
+	parsed, err := url.Parse("file:///C:/artifacts/release-manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := localPathFromFileURL(parsed)
+	want := filepath.FromSlash("C:/artifacts/release-manifest.json")
+	if got != want {
+		t.Fatalf("expected Windows drive to be preserved, got %q want %q", got, want)
 	}
 }
 

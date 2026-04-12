@@ -251,7 +251,7 @@ func (s Summary) ExitCode(mode CommandMode) int {
 func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, results chan<- FileRecord, resumeSet map[string]struct{}, progress *progressReporter) error {
 	root := cfg.RootDir
 	stack := []string{root}
-	visitedDirs := map[string]struct{}{root: {}}
+	visitedDirs := map[string]struct{}{directoryVisitKey(root, cfg.FollowSymlinks): {}}
 
 	for len(stack) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -368,11 +368,11 @@ func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, resul
 				}
 
 				if info.IsDir() {
-					cleanResolved := filepath.Clean(resolved)
-					if _, seen := visitedDirs[cleanResolved]; seen {
+					visitKey := filepath.Clean(resolved)
+					if _, seen := visitedDirs[visitKey]; seen {
 						continue
 					}
-					visitedDirs[cleanResolved] = struct{}{}
+					visitedDirs[visitKey] = struct{}{}
 					stack = append(stack, fullPath)
 					continue
 				}
@@ -382,6 +382,11 @@ func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, resul
 				if _, skip := alwaysSkippedDirs[entry.Name()]; skip {
 					continue
 				}
+				visitKey := directoryVisitKey(fullPath, cfg.FollowSymlinks)
+				if _, seen := visitedDirs[visitKey]; seen {
+					continue
+				}
+				visitedDirs[visitKey] = struct{}{}
 				stack = append(stack, fullPath)
 				continue
 			}
@@ -432,6 +437,17 @@ func walkTree(ctx context.Context, cfg ProcessConfig, jobs chan<- FileJob, resul
 	}
 
 	return nil
+}
+
+func directoryVisitKey(path string, followSymlinks bool) string {
+	if !followSymlinks {
+		return filepath.Clean(path)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(resolved)
 }
 
 func emitWalkResult(ctx context.Context, results chan<- FileRecord, record FileRecord, progress *progressReporter) error {

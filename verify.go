@@ -110,9 +110,9 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (Summary
 					record.Error = decorateVerifyVariantError(variant, outErr.Error())
 					break
 				}
-				if outputInfo.Size() > info.Size() {
+				if outputInfo.Size() >= info.Size() {
 					record.Status = "verify_size_regression"
-					record.Reason = decorateVerifyVariantError(variant, fmt.Sprintf("output %d is larger than source %d", outputInfo.Size(), info.Size()))
+					record.Reason = decorateVerifyVariantError(variant, fmt.Sprintf("output %d is not smaller than source %d", outputInfo.Size(), info.Size()))
 					break
 				}
 

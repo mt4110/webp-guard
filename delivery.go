@@ -1007,7 +1007,7 @@ func verifyFileURL(ctx context.Context, parsed *url.URL, check VerifyCheck) (boo
 		return false, "", err
 	}
 
-	filePath := parsed.Path
+	filePath := localPathFromFileURL(parsed)
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1040,6 +1040,33 @@ func verifyFileURL(ctx context.Context, parsed *url.URL, check VerifyCheck) (boo
 	}
 
 	return true, "", nil
+}
+
+func localPathFromFileURL(parsed *url.URL) string {
+	path := parsed.Path
+	switch {
+	case parsed.Host == "" || strings.EqualFold(parsed.Host, "localhost"):
+		if hasWindowsDrivePath(path) {
+			path = strings.TrimPrefix(path, "/")
+		}
+		return filepath.FromSlash(path)
+	case isWindowsDriveVolume(parsed.Host):
+		return filepath.FromSlash(parsed.Host + path)
+	default:
+		return filepath.FromSlash("//" + parsed.Host + path)
+	}
+}
+
+func isWindowsDriveVolume(value string) bool {
+	if len(value) != 2 || value[1] != ':' {
+		return false
+	}
+	letter := value[0]
+	return (letter >= 'A' && letter <= 'Z') || (letter >= 'a' && letter <= 'z')
+}
+
+func hasWindowsDrivePath(path string) bool {
+	return len(path) >= 3 && path[0] == '/' && isWindowsDriveVolume(path[1:3])
 }
 
 func verifyHTTPURL(ctx context.Context, client *http.Client, check VerifyCheck) (bool, string, error) {
