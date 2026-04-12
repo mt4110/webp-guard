@@ -618,6 +618,43 @@ func TestRunVerifyReturnsReportCloseError(t *testing.T) {
 	}
 }
 
+func TestRunVerifyRejectsReportPathEqualToManifest(t *testing.T) {
+	root := t.TempDir()
+	manifest := filepath.Join(root, "manifest.json")
+	original := []byte(`{
+  "version": 1,
+  "generated_at": "2026-04-10T00:00:00Z",
+  "command": "bulk",
+  "root_dir": ".",
+  "entries": [],
+  "summary": {}
+}`)
+	if err := os.WriteFile(manifest, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	_, err := RunVerify(context.Background(), VerifyConfig{
+		ManifestPath: manifest,
+		ReportPath:   manifest,
+		MaxWidth:     1200,
+	}, &stdout)
+	if err == nil {
+		t.Fatal("expected verify to reject identical manifest and report paths")
+	}
+	if !strings.Contains(err.Error(), "report and manifest must not point to the same file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, readErr := os.ReadFile(manifest)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("verify should not rewrite manifest when report path matches it, got %q want %q", got, original)
+	}
+}
+
 func TestVerifyRejectsManifestEntryWithoutOutputs(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "sample.jpg")

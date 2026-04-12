@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -22,18 +23,6 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 	previousGOMAXPROCS := runtime.GOMAXPROCS(cfg.CPUs)
 	defer runtime.GOMAXPROCS(previousGOMAXPROCS)
 
-	reportWriter, err := reportWriterFactory(cfg.ReportPath)
-	if err != nil {
-		return Summary{}, err
-	}
-	defer func() {
-		if reportWriter != nil {
-			if closeErr := reportWriter.Close(); err == nil && closeErr != nil {
-				err = closeErr
-			}
-		}
-	}()
-
 	summary = Summary{
 		Command:      string(modeVerify),
 		RootDir:      cfg.RootDir,
@@ -42,6 +31,24 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 	}
 
 	writef(stdout, "Starting verify on %s using %s (cpus=%d)\n", cfg.RootDir, cfg.ManifestPath, cfg.CPUs)
+
+	manifestPath, err := filepath.Abs(cfg.ManifestPath)
+	if err != nil {
+		return Summary{}, err
+	}
+	manifestPath, err = resolvePathWithExistingSymlinks(manifestPath)
+	if err != nil {
+		return Summary{}, err
+	}
+	if strings.TrimSpace(cfg.ReportPath) != "" {
+		reportPath, err := resolvePathWithExistingSymlinks(cfg.ReportPath)
+		if err != nil {
+			return Summary{}, err
+		}
+		if reportPath == manifestPath {
+			return Summary{}, fmt.Errorf("report and manifest must not point to the same file")
+		}
+	}
 
 	manifest, err := readConversionManifest(cfg.ManifestPath)
 	if err != nil {
@@ -55,6 +62,18 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 	if err != nil {
 		return Summary{}, err
 	}
+
+	reportWriter, err := reportWriterFactory(cfg.ReportPath)
+	if err != nil {
+		return Summary{}, err
+	}
+	defer func() {
+		if reportWriter != nil {
+			if closeErr := reportWriter.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
+	}()
 
 	progress := newProgressReporterWithWriter(stdout, isInteractiveStream(stdout), string(modeVerify), len(manifest.Entries))
 	defer progress.Close()

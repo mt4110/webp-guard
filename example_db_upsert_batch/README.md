@@ -91,10 +91,10 @@ MySQL / MariaDB:
 
 ```sql
 INSERT INTO asset_variants (logical_path, source_etag, webp_key)
-VALUES (?, ?, ?), (?, ?, ?)
+VALUES (?, ?, ?), (?, ?, ?) AS new_values
 ON DUPLICATE KEY UPDATE
-source_etag = VALUES(source_etag),
-webp_key = VALUES(webp_key)
+source_etag = new_values.source_etag,
+webp_key = new_values.webp_key
 ```
 
 ## カスタマイズの勘所
