@@ -195,13 +195,64 @@ func detectConfigSelection(args []string) (configSelection, error) {
 }
 
 func argsRequestHelp(args []string) bool {
-	for _, arg := range args {
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
 		switch arg {
+		case "--":
+			return false
 		case "-h", "--help":
 			return true
 		}
+		if flagConsumesFollowingValueForHelpScan(arg) {
+			index++
+		}
 	}
 	return false
+}
+
+func flagConsumesFollowingValueForHelpScan(arg string) bool {
+	switch arg {
+	case "-dir", "--dir",
+		"-out-dir", "--out-dir",
+		"-extensions", "--extensions",
+		"-include", "--include",
+		"-exclude", "--exclude",
+		"-max-file-size-mb", "--max-file-size-mb",
+		"-max-pixels", "--max-pixels",
+		"-max-dimension", "--max-dimension",
+		"-max-width", "--max-width",
+		"-cpus", "--cpus",
+		"-workers", "--workers",
+		"-aspect-variants", "--aspect-variants",
+		"-crop-mode", "--crop-mode",
+		"-focus-x", "--focus-x",
+		"-focus-y", "--focus-y",
+		"-quality", "--quality",
+		"-on-existing", "--on-existing",
+		"-report", "--report",
+		"-manifest", "--manifest",
+		"-resume-from", "--resume-from",
+		"-conversion-manifest", "--conversion-manifest",
+		"-release-manifest", "--release-manifest",
+		"-deploy-plan", "--deploy-plan",
+		"-plan", "--plan",
+		"-env", "--env",
+		"-base-url", "--base-url",
+		"-origin-provider", "--origin-provider",
+		"-origin-root", "--origin-root",
+		"-origin-prefix", "--origin-prefix",
+		"-cdn-provider", "--cdn-provider",
+		"-immutable-prefix", "--immutable-prefix",
+		"-mutable-prefix", "--mutable-prefix",
+		"-verify-sample", "--verify-sample",
+		"-dry-run", "--dry-run",
+		"-config", "--config",
+		"-path", "--path",
+		"-shell", "--shell":
+		return true
+	default:
+		return false
+	}
 }
 
 func discoverConfigFile(startDir string) (string, bool, error) {

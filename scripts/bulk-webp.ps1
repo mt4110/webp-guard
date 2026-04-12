@@ -56,7 +56,7 @@ function Invoke-WebPGuard {
         }
 
         foreach ($candidate in $binaryCandidates) {
-            if (Test-Path $candidate) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
                 & $candidate bulk --dir $TargetDir @ArgsToForward
                 return $LASTEXITCODE
             }

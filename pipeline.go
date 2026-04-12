@@ -97,6 +97,29 @@ type Summary struct {
 	StatusCounts map[string]int `json:"status_counts"`
 }
 
+type labeledPath struct {
+	label string
+	path  string
+}
+
+func rejectPathCollisions(paths ...labeledPath) error {
+	seen := make(map[string]string, len(paths))
+	for _, candidate := range paths {
+		if strings.TrimSpace(candidate.path) == "" {
+			continue
+		}
+		resolvedPath, err := resolvePathWithExistingSymlinks(candidate.path)
+		if err != nil {
+			return err
+		}
+		if previous, exists := seen[resolvedPath]; exists {
+			return fmt.Errorf("%s and %s must not point to the same file", previous, candidate.label)
+		}
+		seen[resolvedPath] = candidate.label
+	}
+	return nil
+}
+
 func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, stdout io.Writer) (summary Summary, err error) {
 	if err := ctx.Err(); err != nil {
 		return Summary{}, err
@@ -114,6 +137,17 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 		return Summary{}, err
 	}
 
+	manifestPath := cfg.ManifestPath
+	if cfg.Mode == modeScan {
+		manifestPath = ""
+	}
+	if err := rejectPathCollisions(
+		labeledPath{label: "report", path: cfg.ReportPath},
+		labeledPath{label: "manifest", path: manifestPath},
+	); err != nil {
+		return Summary{}, err
+	}
+
 	reportWriter, err := reportWriterFactory(cfg.ReportPath)
 	if err != nil {
 		return Summary{}, err
@@ -125,11 +159,6 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 			}
 		}
 	}()
-
-	manifestPath := cfg.ManifestPath
-	if cfg.Mode == modeScan {
-		manifestPath = ""
-	}
 
 	manifestWriter, err := newManifestWriter(manifestPath, cfg)
 	if err != nil {

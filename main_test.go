@@ -586,6 +586,29 @@ func TestRunProcessCommandDoesNotOverwriteManifestDuringScan(t *testing.T) {
 	}
 }
 
+func TestRunProcessCommandRejectsReportPathEqualToManifest(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "sample.jpg")
+	writeJPEG(t, source, 800, 400)
+
+	sharedPath := filepath.Join(root, "shared-output.json")
+	cfg := testConfig(root)
+	cfg.ReportPath = sharedPath
+	cfg.ManifestPath = sharedPath
+
+	var stdout bytes.Buffer
+	_, err := RunProcessCommand(context.Background(), cfg, newDimensionAwareFakeEncoder(t, 64, nil), &stdout)
+	if err == nil {
+		t.Fatal("expected process command to reject identical manifest and report paths")
+	}
+	if !strings.Contains(err.Error(), "report and manifest must not point to the same file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(sharedPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected colliding output path to stay untouched, got err=%v", statErr)
+	}
+}
+
 func TestRunVerifyReturnsReportCloseError(t *testing.T) {
 	root := t.TempDir()
 	manifest := filepath.Join(root, "manifest.json")

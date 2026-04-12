@@ -117,3 +117,40 @@ dir = "./assets"
 		t.Fatalf("expected config file to load when \"help\" is only a flag value, got %#v", runtimeCfg)
 	}
 }
+
+func TestArgsRequestHelpSkipsConsumedFlagValues(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "plain help",
+			args: []string{"-h"},
+			want: true,
+		},
+		{
+			name: "value for dir flag",
+			args: []string{"-dir", "-h"},
+			want: false,
+		},
+		{
+			name: "value for config flag",
+			args: []string{"--config", "--help"},
+			want: false,
+		},
+		{
+			name: "after double dash",
+			args: []string{"--", "-h"},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := argsRequestHelp(tc.args); got != tc.want {
+				t.Fatalf("argsRequestHelp(%q) = %t, want %t", tc.args, got, tc.want)
+			}
+		})
+	}
+}
