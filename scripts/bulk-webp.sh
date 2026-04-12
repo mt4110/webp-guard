@@ -20,6 +20,23 @@ pick_directory() {
   printf '%s' "${selected}"
 }
 
+resolve_target_dir() {
+  local dir="$1"
+
+  if [[ "${dir}" != /* ]]; then
+    dir="${REPO_ROOT}/${dir}"
+  fi
+
+  if [[ ! -d "${dir}" ]]; then
+    return 1
+  fi
+
+  (
+    cd "${dir}"
+    pwd -P
+  )
+}
+
 run_cli() {
   local dir="$1"
   shift
@@ -54,7 +71,7 @@ if [[ -z "${TARGET_DIR}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${TARGET_DIR}" ]]; then
+if ! TARGET_DIR="$(resolve_target_dir "${TARGET_DIR}")"; then
   printf 'Directory not found: %s\n' "${TARGET_DIR}" >&2
   exit 1
 fi

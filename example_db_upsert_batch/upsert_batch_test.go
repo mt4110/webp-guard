@@ -58,8 +58,11 @@ func TestBuildUpsertQueryMySQL(t *testing.T) {
 	if !strings.Contains(query, "ON DUPLICATE KEY UPDATE") {
 		t.Fatalf("expected mysql upsert clause, got %s", query)
 	}
-	if !strings.Contains(query, "source_etag = VALUES(source_etag)") {
-		t.Fatalf("expected mysql VALUES() assignment, got %s", query)
+	if !strings.Contains(query, "VALUES (?, ?, ?) AS new_values ON DUPLICATE KEY UPDATE") {
+		t.Fatalf("expected mysql row alias in upsert query, got %s", query)
+	}
+	if !strings.Contains(query, "source_etag = new_values.source_etag") {
+		t.Fatalf("expected mysql alias assignment, got %s", query)
 	}
 }
 

@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..")
+$RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 
 function Select-TargetDirectory {
     $dialog = $null
@@ -75,6 +75,29 @@ function Invoke-WebPGuard {
     throw "webp-guard requires either Go (for go run) or a built webp-guard binary."
 }
 
+function Resolve-TargetDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $candidate = $Path
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $RepoRoot $candidate
+    }
+
+    try {
+        return (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
+    }
+    catch {
+        return $null
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($Directory)) {
     $Directory = Select-TargetDirectory
 }
@@ -87,9 +110,10 @@ if ([string]::IsNullOrWhiteSpace($Directory)) {
     throw "No directory selected."
 }
 
-if (-not (Test-Path $Directory -PathType Container)) {
+$ResolvedDirectory = Resolve-TargetDirectory -Path $Directory
+if ([string]::IsNullOrWhiteSpace($ResolvedDirectory) -or -not (Test-Path -LiteralPath $ResolvedDirectory -PathType Container)) {
     throw "Directory not found: $Directory"
 }
 
-$exitCode = Invoke-WebPGuard -TargetDir $Directory -ArgsToForward $ForwardArgs
+$exitCode = Invoke-WebPGuard -TargetDir $ResolvedDirectory -ArgsToForward $ForwardArgs
 exit $exitCode

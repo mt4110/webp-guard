@@ -13,9 +13,10 @@ import (
 type Dialect string
 
 const (
-	DialectPostgres Dialect = "postgres"
-	DialectMySQL    Dialect = "mysql"
-	DialectSQLite   Dialect = "sqlite"
+	DialectPostgres  Dialect = "postgres"
+	DialectMySQL     Dialect = "mysql"
+	DialectSQLite    Dialect = "sqlite"
+	mysqlInsertAlias         = "new_values"
 )
 
 type Row []any
@@ -169,8 +170,10 @@ func buildUpsertQuery(cfg Config, rows []Row) (string, []any, error) {
 		builder.WriteString(") DO UPDATE SET ")
 		builder.WriteString(excludedAssignments(cfg.UpdateColumns))
 	case DialectMySQL:
+		builder.WriteString(" AS ")
+		builder.WriteString(mysqlInsertAlias)
 		builder.WriteString(" ON DUPLICATE KEY UPDATE ")
-		builder.WriteString(mysqlAssignments(cfg.UpdateColumns))
+		builder.WriteString(mysqlAssignments(cfg.UpdateColumns, mysqlInsertAlias))
 	default:
 		return "", nil, fmt.Errorf("unsupported dialect: %q", cfg.Dialect)
 	}
@@ -319,10 +322,10 @@ func excludedAssignments(columns []string) string {
 	return strings.Join(assignments, ", ")
 }
 
-func mysqlAssignments(columns []string) string {
+func mysqlAssignments(columns []string, alias string) string {
 	assignments := make([]string, 0, len(columns))
 	for _, column := range columns {
-		assignments = append(assignments, column+" = VALUES("+column+")")
+		assignments = append(assignments, column+" = "+alias+"."+column)
 	}
 	return strings.Join(assignments, ", ")
 }
