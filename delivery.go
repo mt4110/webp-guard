@@ -363,6 +363,10 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 	}
 
 	artifactRoot := filepath.Dir(cfg.DeployPlanPath)
+	releaseManifestPath, err := resolveContainedArtifactPath(artifactRoot, cfg.ReleaseManifestPath, "release manifest path")
+	if err != nil {
+		return PlanSummary{}, err
+	}
 	conversionManifest, err := readConversionManifest(cfg.ConversionManifestPath)
 	if err != nil {
 		return PlanSummary{}, err
@@ -549,11 +553,11 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 		releaseManifest.Assets = append(releaseManifest.Assets, asset)
 	}
 
-	if err := writeJSONFile(ctx, cfg.ReleaseManifestPath, releaseManifest); err != nil {
+	if err := writeJSONFile(ctx, releaseManifestPath, releaseManifest); err != nil {
 		return PlanSummary{}, err
 	}
 
-	manifestHash, _, err := hashFileContext(ctx, cfg.ReleaseManifestPath)
+	manifestHash, _, err := hashFileContext(ctx, releaseManifestPath)
 	if err != nil {
 		return PlanSummary{}, err
 	}
@@ -569,7 +573,7 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 	verifyChecks = append(verifyChecks, check)
 	verifyChecks = append(verifyChecks, verifyCandidates...)
 
-	releaseManifestRel, err := relativeArtifactPath(artifactRoot, cfg.ReleaseManifestPath)
+	releaseManifestRel, err := relativeArtifactPath(artifactRoot, releaseManifestPath)
 	if err != nil {
 		return PlanSummary{}, err
 	}
@@ -634,7 +638,7 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 	if _, err := fmt.Fprintf(stdout, "Planned %d assets for %s\n", len(releaseManifest.Assets), cfg.Environment); err != nil {
 		return PlanSummary{}, err
 	}
-	if _, err := fmt.Fprintf(stdout, "  release manifest: %s\n", cfg.ReleaseManifestPath); err != nil {
+	if _, err := fmt.Fprintf(stdout, "  release manifest: %s\n", releaseManifestPath); err != nil {
 		return PlanSummary{}, err
 	}
 	if _, err := fmt.Fprintf(stdout, "  deploy plan: %s\n", cfg.DeployPlanPath); err != nil {
@@ -645,7 +649,7 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 	}
 	return PlanSummary{
 		Environment:         cfg.Environment,
-		ReleaseManifestPath: cfg.ReleaseManifestPath,
+		ReleaseManifestPath: releaseManifestPath,
 		DeployPlanPath:      cfg.DeployPlanPath,
 		Assets:              len(releaseManifest.Assets),
 		ImmutableUploads:    len(deployPlan.Uploads),

@@ -1153,6 +1153,20 @@ func TestProcessConfigRejectsNaNFocusCoordinates(t *testing.T) {
 	}
 }
 
+func TestProcessConfigClearsResumeFromDuringScan(t *testing.T) {
+	raw := newProcessFlagValues()
+	raw.rootDir = t.TempDir()
+	raw.resumeFrom = filepath.Join(t.TempDir(), "resume.jsonl")
+
+	cfg, err := raw.toProcessConfig(modeScan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ResumeFrom != "" {
+		t.Fatalf("expected scan config to ignore resume-from, got %#v", cfg)
+	}
+}
+
 func testConfig(root string) ProcessConfig {
 	return ProcessConfig{
 		Mode:             modeBulk,

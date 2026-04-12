@@ -781,8 +781,10 @@ func (raw *processFlagValues) toProcessConfig(mode CommandMode) (ProcessConfig, 
 	}
 
 	manifestPath := raw.manifestPath
+	resumeFrom := raw.resumeFrom
 	if mode == modeScan {
 		manifestPath = ""
+		resumeFrom = ""
 	}
 
 	cfg := ProcessConfig{
@@ -812,7 +814,7 @@ func (raw *processFlagValues) toProcessConfig(mode CommandMode) (ProcessConfig, 
 		ExistingPolicy:   policy,
 		ReportPath:       raw.reportPath,
 		ManifestPath:     manifestPath,
-		ResumeFrom:       raw.resumeFrom,
+		ResumeFrom:       resumeFrom,
 	}
 	cfg.ConfigFingerprint = processConfigFingerprint(cfg)
 	return cfg, nil

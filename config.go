@@ -197,7 +197,7 @@ func detectConfigSelection(args []string) (configSelection, error) {
 func argsRequestHelp(args []string) bool {
 	for _, arg := range args {
 		switch arg {
-		case "-h", "--help", "help":
+		case "-h", "--help":
 			return true
 		}
 	}

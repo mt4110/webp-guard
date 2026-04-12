@@ -604,6 +604,33 @@ func TestResolveConversionEntryPathsRejectsEscapingArtifactRoots(t *testing.T) {
 	}
 }
 
+func TestRunPlanRejectsReleaseManifestOutsideArtifactRoot(t *testing.T) {
+	artifactDir := filepath.Join(t.TempDir(), "artifact")
+	releaseManifest := filepath.Join(t.TempDir(), "release-manifest.json")
+	deployPlanPath := filepath.Join(artifactDir, "deploy-plan.dev.json")
+
+	var stdout bytes.Buffer
+	_, err := RunPlan(context.Background(), PlanConfig{
+		ConversionManifestPath: filepath.Join(artifactDir, "conversion-manifest.json"),
+		ReleaseManifestPath:    releaseManifest,
+		DeployPlanPath:         deployPlanPath,
+		Environment:            "dev",
+		OriginProvider:         "local",
+		CDNProvider:            "noop",
+		ImmutablePrefix:        "assets",
+		MutablePrefix:          "release",
+	}, &stdout)
+	if err == nil {
+		t.Fatal("expected release manifest outside artifact root to fail")
+	}
+	if !strings.Contains(err.Error(), "release manifest path") || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("unexpected plan error: %v", err)
+	}
+	if _, statErr := os.Stat(releaseManifest); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no release manifest to be written outside artifact root, got err=%v", statErr)
+	}
+}
+
 func TestRunProcessCommandHandlesLargeBatchWithOutDir(t *testing.T) {
 	root := t.TempDir()
 	outDir := filepath.Join(t.TempDir(), "bulk-out")

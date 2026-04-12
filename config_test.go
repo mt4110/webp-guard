@@ -96,3 +96,24 @@ dir = "./assets"
 		t.Fatalf("expected config file to load, got %#v", runtimeCfg)
 	}
 }
+
+func TestLoadRuntimeConfigDoesNotTreatHelpFlagValueAsHelp(t *testing.T) {
+	root := t.TempDir()
+	config := `schema_version = 1
+
+[process]
+dir = "./assets"
+`
+	if err := os.WriteFile(filepath.Join(root, defaultConfigFileName), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	runtimeCfg, err := loadRuntimeConfig([]string{"-dir", "help"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtimeCfg.BaseDir == "" || runtimeCfg.File.Process.Dir == nil {
+		t.Fatalf("expected config file to load when \"help\" is only a flag value, got %#v", runtimeCfg)
+	}
+}

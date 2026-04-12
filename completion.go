@@ -24,38 +24,38 @@ var (
 		"help",
 	}
 	completionShells    = []string{"bash", "zsh", "fish", "powershell", "pwsh"}
-	rootCompletionFlags = []string{
+	rootCompletionFlags = flagVariants(
 		"-dir", "-extensions", "-include", "-exclude", "-include-hidden", "-follow-symlinks",
 		"-max-file-size-mb", "-max-pixels", "-max-dimension", "-cpus", "-max-width",
 		"-aspect-variants", "-crop-mode", "-focus-x", "-focus-y", "-quality", "-workers",
 		"-dry-run", "-out-dir", "-overwrite", "-on-existing", "-report", "-manifest",
-		"-resume-from", "-json", "-config", "-no-config", "-h", "--help", "-version", "--version",
-	}
+		"-resume-from", "-json", "-config", "-no-config", "-h", "--help", "-version",
+	)
 	bulkCompletionFlags = rootCompletionFlags
-	scanCompletionFlags = []string{
+	scanCompletionFlags = flagVariants(
 		"-dir", "-extensions", "-include", "-exclude", "-include-hidden", "-follow-symlinks",
 		"-max-file-size-mb", "-max-pixels", "-max-dimension", "-cpus", "-report", "-json",
 		"-config", "-no-config", "-h", "--help",
-	}
-	verifyCompletionFlags = []string{
+	)
+	verifyCompletionFlags = flagVariants(
 		"-dir", "-manifest", "-report", "-max-width", "-cpus", "-json",
 		"-config", "-no-config", "-h", "--help",
-	}
-	planCompletionFlags = []string{
+	)
+	planCompletionFlags = flagVariants(
 		"-conversion-manifest", "-release-manifest", "-deploy-plan", "-env", "-base-url",
 		"-origin-provider", "-origin-root", "-origin-prefix", "-cdn-provider",
 		"-immutable-prefix", "-mutable-prefix", "-verify-sample", "-json",
 		"-config", "-no-config", "-h", "--help",
-	}
-	publishCompletionFlags = []string{
+	)
+	publishCompletionFlags = flagVariants(
 		"-plan", "-dry-run", "-json", "-config", "-no-config", "-h", "--help",
-	}
-	verifyDeliveryCompletionFlags = []string{
+	)
+	verifyDeliveryCompletionFlags = flagVariants(
 		"-plan", "-json", "-config", "-no-config", "-h", "--help",
-	}
-	initCompletionFlags    = []string{"-path", "-force", "-h", "--help"}
-	doctorCompletionFlags  = []string{"-json", "-config", "-no-config", "-h", "--help"}
-	completionCommandFlags = []string{"-shell", "-h", "--help"}
+	)
+	initCompletionFlags    = flagVariants("-path", "-force", "-h", "--help")
+	doctorCompletionFlags  = flagVariants("-json", "-config", "-no-config", "-h", "--help")
+	completionCommandFlags = flagVariants("-shell", "-h", "--help")
 	versionCommandFlags    = []string{"-h", "--help"}
 )
 
@@ -175,35 +175,35 @@ _webp_guard()
 	done
 
 	case "$prev" in
-		-dir|-out-dir|-origin-root)
+		-dir|--dir|-out-dir|--out-dir|-origin-root|--origin-root)
 			COMPREPLY=( $(compgen -d -- "$cur") )
 			return 0
 			;;
-		-report|-manifest|-resume-from|-conversion-manifest|-release-manifest|-deploy-plan|-plan|-config|-path)
+		-report|--report|-manifest|--manifest|-resume-from|--resume-from|-conversion-manifest|--conversion-manifest|-release-manifest|--release-manifest|-deploy-plan|--deploy-plan|-plan|--plan|-config|--config|-path|--path)
 			COMPREPLY=( $(compgen -f -- "$cur") )
 			return 0
 			;;
-		-crop-mode)
+		-crop-mode|--crop-mode)
 			COMPREPLY=( $(compgen -W "safe focus" -- "$cur") )
 			return 0
 			;;
-		-on-existing)
+		-on-existing|--on-existing)
 			COMPREPLY=( $(compgen -W "skip overwrite fail" -- "$cur") )
 			return 0
 			;;
-		-origin-provider)
+		-origin-provider|--origin-provider)
 			COMPREPLY=( $(compgen -W "local" -- "$cur") )
 			return 0
 			;;
-		-cdn-provider)
+		-cdn-provider|--cdn-provider)
 			COMPREPLY=( $(compgen -W "noop" -- "$cur") )
 			return 0
 			;;
-		-shell)
+		-shell|--shell)
 			COMPREPLY=( $(compgen -W "%s" -- "$cur") )
 			return 0
 			;;
-		-dry-run)
+		-dry-run|--dry-run)
 			if [[ "$command" == "publish" ]]; then
 				COMPREPLY=( $(compgen -W "off plan verify" -- "$cur") )
 			fi
@@ -344,16 +344,16 @@ func renderFishCompletionScript() string {
 	builder.WriteString("complete -c webp-guard -n '__webp_guard_using_subcommand help' -a '")
 	builder.WriteString(strings.Join(completionCommands, " "))
 	builder.WriteString("'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in completion -shell; and not string match -qr \"^-\" -- (commandline -ct)' -a '")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in completion -shell --shell; and not string match -qr \"^-\" -- (commandline -ct)' -a '")
 	builder.WriteString(strings.Join(completionShells, " "))
 	builder.WriteString("'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -crop-mode' -a 'safe focus'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -on-existing' -a 'skip overwrite fail'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -origin-provider' -a 'local'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -cdn-provider' -a 'noop'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -dry-run; and __webp_guard_using_subcommand publish' -a 'off plan verify'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -dir -out-dir -origin-root' -a '(__fish_complete_directories)'\n")
-	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -report -manifest -resume-from -conversion-manifest -release-manifest -deploy-plan -plan -config -path' -a '(__fish_complete_path)'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -crop-mode --crop-mode' -a 'safe focus'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -on-existing --on-existing' -a 'skip overwrite fail'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -origin-provider --origin-provider' -a 'local'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -cdn-provider --cdn-provider' -a 'noop'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -dry-run --dry-run; and __webp_guard_using_subcommand publish' -a 'off plan verify'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -dir --dir -out-dir --out-dir -origin-root --origin-root' -a '(__fish_complete_directories)'\n")
+	builder.WriteString("complete -c webp-guard -n '__webp_guard_prev_arg_in -report --report -manifest --manifest -resume-from --resume-from -conversion-manifest --conversion-manifest -release-manifest --release-manifest -deploy-plan --deploy-plan -plan --plan -config --config -path --path' -a '(__fish_complete_path)'\n")
 
 	return builder.String()
 }
@@ -401,11 +401,22 @@ Register-ArgumentCompleter -CommandName webp-guard -ScriptBlock {
     $candidates = @()
     switch ($previous) {
         "-shell" { $candidates = $shells; break }
+        "--shell" { $candidates = $shells; break }
         "-crop-mode" { $candidates = @("safe", "focus"); break }
+        "--crop-mode" { $candidates = @("safe", "focus"); break }
         "-on-existing" { $candidates = @("skip", "overwrite", "fail"); break }
+        "--on-existing" { $candidates = @("skip", "overwrite", "fail"); break }
         "-origin-provider" { $candidates = @("local"); break }
+        "--origin-provider" { $candidates = @("local"); break }
         "-cdn-provider" { $candidates = @("noop"); break }
+        "--cdn-provider" { $candidates = @("noop"); break }
         "-dry-run" {
+            if ($currentCommand -eq "publish") {
+                $candidates = @("off", "plan", "verify")
+            }
+            break
+        }
+        "--dry-run" {
             if ($currentCommand -eq "publish") {
                 $candidates = @("off", "plan", "verify")
             }
@@ -455,6 +466,18 @@ Register-ArgumentCompleter -CommandName webp-guard -ScriptBlock {
 
 func completionWords(items []string) string {
 	return strings.Join(items, " ")
+}
+
+func flagVariants(flags ...string) []string {
+	variants := make([]string, 0, len(flags)*2)
+	for _, flagName := range flags {
+		variants = append(variants, flagName)
+		if !strings.HasPrefix(flagName, "-") || strings.HasPrefix(flagName, "--") || flagName == "-h" {
+			continue
+		}
+		variants = append(variants, "-"+flagName)
+	}
+	return variants
 }
 
 func bashCasePattern(items []string) string {

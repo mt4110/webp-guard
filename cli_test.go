@@ -207,8 +207,11 @@ func TestCompletionCommandWritesScriptToStdout(t *testing.T) {
 }
 
 func TestRootCompletionFlagsIncludeVersionAliases(t *testing.T) {
-	if !strings.Contains(completionWords(rootCompletionFlags), "-version") || !strings.Contains(completionWords(rootCompletionFlags), "--version") {
-		t.Fatalf("expected root completion flags to include version aliases, got %v", rootCompletionFlags)
+	words := completionWords(rootCompletionFlags)
+	for _, needle := range []string{"-version", "--version", "--dir", "--dry-run", "--out-dir"} {
+		if !strings.Contains(words, needle) {
+			t.Fatalf("expected root completion flags to include %q, got %v", needle, rootCompletionFlags)
+		}
 	}
 }
 
@@ -224,7 +227,7 @@ func TestBashCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
 
 func TestFishCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
 	script := renderFishCompletionScript()
-	if !strings.Contains(script, `__webp_guard_prev_arg_in completion -shell; and not string match -qr "^-" -- (commandline -ct)`) {
+	if !strings.Contains(script, `__webp_guard_prev_arg_in completion -shell --shell; and not string match -qr "^-" -- (commandline -ct)`) {
 		t.Fatalf("expected fish completion to gate shell suggestions to positional args, got %q", script)
 	}
 }
@@ -240,6 +243,29 @@ func TestPowerShellCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
 	script := renderPowerShellCompletionScript()
 	if strings.Contains(script, `"completion" { $candidates = $shells; break }`) {
 		t.Fatalf("expected PowerShell completion to reserve shell suggestions for positional args, got %q", script)
+	}
+}
+
+func TestCompletionValueCasesIncludeDoubleDashFlags(t *testing.T) {
+	bash := renderBashCompletionScript()
+	for _, needle := range []string{"-dir|--dir", "-shell|--shell", "-dry-run|--dry-run"} {
+		if !strings.Contains(bash, needle) {
+			t.Fatalf("expected bash completion to include %q, got %q", needle, bash)
+		}
+	}
+
+	fish := renderFishCompletionScript()
+	for _, needle := range []string{"__webp_guard_prev_arg_in -dir --dir", "__webp_guard_prev_arg_in -crop-mode --crop-mode", "__webp_guard_prev_arg_in -dry-run --dry-run"} {
+		if !strings.Contains(fish, needle) {
+			t.Fatalf("expected fish completion to include %q, got %q", needle, fish)
+		}
+	}
+
+	powershell := renderPowerShellCompletionScript()
+	for _, needle := range []string{`"--shell" { $candidates = $shells; break }`, `"--dry-run" {`, `"--crop-mode" { $candidates = @("safe", "focus"); break }`} {
+		if !strings.Contains(powershell, needle) {
+			t.Fatalf("expected PowerShell completion to include %q, got %q", needle, powershell)
+		}
 	}
 }
 
