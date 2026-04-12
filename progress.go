@@ -135,6 +135,19 @@ func (p *progressReporter) ClearForLog() {
 	p.clearLocked()
 }
 
+func (p *progressReporter) WriteLine(writer io.Writer, args ...any) {
+	if !p.enabled || writer != p.writer {
+		writeLine(writer, args...)
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.clearLocked()
+	writeLine(writer, args...)
+}
+
 func (p *progressReporter) renderLocked(force bool) {
 	if !p.enabled || p.finished {
 		return

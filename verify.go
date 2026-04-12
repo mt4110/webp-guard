@@ -169,8 +169,7 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 		if err := reportWriter.Write(record); err != nil {
 			return Summary{}, err
 		}
-		progress.ClearForLog()
-		writeLine(stdout, formatRecord(record))
+		progress.WriteLine(stdout, formatRecord(record))
 	}
 
 	summary.FinishedAt = time.Now().UTC()

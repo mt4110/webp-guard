@@ -66,3 +66,21 @@ func TestProgressClearForLogClearsRenderedLine(t *testing.T) {
 		t.Fatalf("expected lastWidth reset, got %d", progress.lastWidth)
 	}
 }
+
+func TestProgressWriteLineClearsRenderedLineBeforeLog(t *testing.T) {
+	var buf bytes.Buffer
+	progress := &progressReporter{
+		writer:    &buf,
+		enabled:   true,
+		lastWidth: 5,
+	}
+
+	progress.WriteLine(&buf, "record")
+
+	if got := buf.String(); got != "\r     \rrecord\n" {
+		t.Fatalf("expected clear sequence followed by log line, got %q", got)
+	}
+	if progress.lastWidth != 0 {
+		t.Fatalf("expected lastWidth reset, got %d", progress.lastWidth)
+	}
+}

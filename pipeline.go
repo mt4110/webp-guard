@@ -232,8 +232,7 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 				return Summary{}, err
 			}
 		}
-		progress.ClearForLog()
-		writeLine(stdout, formatRecord(record))
+		progress.WriteLine(stdout, formatRecord(record))
 	}
 
 	if err := <-walkErrCh; err != nil {
