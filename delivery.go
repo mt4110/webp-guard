@@ -258,6 +258,21 @@ func normalizePlanConfig(cfg PlanConfig) (PlanConfig, error) {
 	if err != nil {
 		return PlanConfig{}, err
 	}
+	pathLabels := []struct {
+		flag string
+		path string
+	}{
+		{flag: "-conversion-manifest", path: cfg.ConversionManifestPath},
+		{flag: "-release-manifest", path: cfg.ReleaseManifestPath},
+		{flag: "-deploy-plan", path: cfg.DeployPlanPath},
+	}
+	seenPaths := make(map[string]string, len(pathLabels))
+	for _, candidate := range pathLabels {
+		if previousFlag, exists := seenPaths[candidate.path]; exists {
+			return PlanConfig{}, fmt.Errorf("%s and %s must not point to the same file", previousFlag, candidate.flag)
+		}
+		seenPaths[candidate.path] = candidate.flag
+	}
 	cfg.OriginRoot, err = normalizeOptionalDir(cfg.OriginRoot)
 	if err != nil {
 		return PlanConfig{}, err
@@ -1334,7 +1349,17 @@ func buildVerifyCheck(baseURL string, objectKey string) VerifyCheck {
 }
 
 func joinURL(baseURL string, objectKey string) string {
-	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(objectKey, "/")
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(objectKey, "/")
+	}
+	joinedPath := strings.TrimRight(parsed.Path, "/") + "/" + strings.TrimLeft(objectKey, "/")
+	if joinedPath == "" {
+		joinedPath = "/"
+	}
+	parsed.Path = joinedPath
+	parsed.RawPath = ""
+	return parsed.String()
 }
 
 func fileURL(path string) string {

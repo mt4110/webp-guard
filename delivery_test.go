@@ -400,6 +400,47 @@ func TestNormalizePlanConfigRequiresAbsoluteHTTPBaseURL(t *testing.T) {
 	}
 }
 
+func TestNormalizePlanConfigRejectsCollidingArtifactPaths(t *testing.T) {
+	root := t.TempDir()
+	sharedPath := filepath.Join(root, "artifacts.json")
+
+	_, err := normalizePlanConfig(PlanConfig{
+		ConversionManifestPath: filepath.Join(root, "conversion-manifest.json"),
+		ReleaseManifestPath:    sharedPath,
+		DeployPlanPath:         sharedPath,
+		Environment:            "dev",
+		OriginProvider:         "local",
+		OriginRoot:             root,
+		CDNProvider:            "noop",
+		ImmutablePrefix:        "assets",
+		MutablePrefix:          "release",
+	})
+	if err == nil {
+		t.Fatal("expected colliding release and deploy outputs to fail")
+	}
+	if !strings.Contains(err.Error(), "-release-manifest and -deploy-plan must not point to the same file") {
+		t.Fatalf("unexpected collision error: %v", err)
+	}
+}
+
+func TestJoinURLPathEscapesReservedCharacters(t *testing.T) {
+	joined := joinURL("https://cdn.example.com/assets", "nested/hero?#.webp")
+	parsed, err := url.Parse(joined)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if parsed.Path != "/assets/nested/hero?#.webp" {
+		t.Fatalf("expected reserved characters to stay in the path, got %q", parsed.Path)
+	}
+	if parsed.RawQuery != "" {
+		t.Fatalf("expected no query string, got %q", parsed.RawQuery)
+	}
+	if parsed.Fragment != "" {
+		t.Fatalf("expected no fragment, got %q", parsed.Fragment)
+	}
+}
+
 func TestRunProcessCommandHandlesLargeBatchWithOutDir(t *testing.T) {
 	root := t.TempDir()
 	outDir := filepath.Join(t.TempDir(), "bulk-out")

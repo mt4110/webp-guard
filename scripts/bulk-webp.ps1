@@ -11,13 +11,24 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
 function Select-TargetDirectory {
-    Add-Type -AssemblyName System.Windows.Forms | Out-Null
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "Choose an image directory"
-    $dialog.UseDescriptionForTitle = $true
+    $dialog = $null
+    try {
+        Add-Type -AssemblyName System.Windows.Forms | Out-Null
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = "Choose an image directory"
+        $dialog.UseDescriptionForTitle = $true
 
-    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-        return $dialog.SelectedPath
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            return $dialog.SelectedPath
+        }
+    }
+    catch {
+        return $null
+    }
+    finally {
+        if ($null -ne $dialog) {
+            $dialog.Dispose()
+        }
     }
 
     return $null
