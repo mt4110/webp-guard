@@ -68,6 +68,9 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 		sourcePath, pathErr := resolveArtifactPath(sourceRoot, entry.SourcePath)
 		record := newRecord(modeVerify, "", entry.SourcePath, entry.RelativePath, extWithoutDot(entry.SourcePath), "")
 		record.OutputPath = entry.OutputPath
+		if resolvedOutputPath, resolveErr := resolveArtifactPath(outputRoot, entry.OutputPath); resolveErr == nil {
+			record.OutputPath = resolvedOutputPath
+		}
 		record.FileSizeBytes = entry.SourceSizeBytes
 		record.OutputSizeBytes = entry.OutputSizeBytes
 		record.Width = entry.Width
@@ -144,6 +147,7 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 		if err := reportWriter.Write(record); err != nil {
 			return Summary{}, err
 		}
+		progress.ClearForLog()
 		writeLine(stdout, formatRecord(record))
 	}
 

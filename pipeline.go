@@ -196,6 +196,7 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 				return Summary{}, err
 			}
 		}
+		progress.ClearForLog()
 		writeLine(stdout, formatRecord(record))
 	}
 
@@ -688,12 +689,21 @@ func shouldSkipConfiguredOutputPath(cfg ProcessConfig, candidate string) bool {
 		return false
 	}
 
-	insideRoot, err := pathWithinRoot(cfg.RootDir, cfg.OutDir)
+	rootPath := cfg.RootDir
+	outDirPath := cfg.OutDir
+	candidatePath := candidate
+	if cfg.FollowSymlinks {
+		rootPath = directoryVisitKey(cfg.RootDir, true)
+		outDirPath = directoryVisitKey(cfg.OutDir, true)
+		candidatePath = directoryVisitKey(candidate, true)
+	}
+
+	insideRoot, err := pathWithinRoot(rootPath, outDirPath)
 	if err != nil || !insideRoot {
 		return false
 	}
 
-	withinOutDir, err := pathWithinRoot(cfg.OutDir, candidate)
+	withinOutDir, err := pathWithinRoot(outDirPath, candidatePath)
 	if err != nil {
 		return false
 	}

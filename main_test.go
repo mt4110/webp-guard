@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -517,6 +518,17 @@ func TestVerifyRejectsEqualSizedOutput(t *testing.T) {
 	if !strings.Contains(string(reportContent), `"status":"verify_size_regression"`) {
 		t.Fatalf("expected verify_size_regression in report, got %s", reportContent)
 	}
+	var record FileRecord
+	lines := strings.Split(strings.TrimSpace(string(reportContent)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected a single report record, got %d lines", len(lines))
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(record.OutputPath) != filepath.Clean(output) {
+		t.Fatalf("expected report output_path to resolve to %q, got %q", output, record.OutputPath)
+	}
 }
 
 func TestRunProcessCommandReturnsReportCloseError(t *testing.T) {
@@ -874,6 +886,56 @@ func TestWalkTreeDedupesDirectoriesReachedViaSymlink(t *testing.T) {
 	}
 	if got[0].RelativePath != "alias/hero.jpg" && got[0].RelativePath != "images/hero.jpg" {
 		t.Fatalf("unexpected walked path %#v", got[0])
+	}
+}
+
+func TestWalkTreeSkipsOutDirReachedViaSymlinkAlias(t *testing.T) {
+	root := t.TempDir()
+	imagesDir := filepath.Join(root, "images")
+	if err := os.MkdirAll(imagesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeJPEG(t, filepath.Join(imagesDir, "hero.jpg"), 1600, 800)
+
+	outDir := filepath.Join(root, "generated")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "hero.webp"), []byte("webp"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	aliasDir := filepath.Join(root, "generated-alias")
+	if err := os.Symlink(outDir, aliasDir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cfg := testConfig(root)
+	cfg.OutDir = outDir
+	cfg.FollowSymlinks = true
+
+	jobs := make(chan FileJob, 8)
+	results := make(chan FileRecord, 8)
+	progress := newProgressReporterWithWriter(io.Discard, false, "test", 0)
+
+	if err := walkTree(context.Background(), cfg, jobs, results, map[string]struct{}{}, progress); err != nil {
+		t.Fatal(err)
+	}
+	close(jobs)
+	close(results)
+
+	var gotJobs []FileJob
+	for job := range jobs {
+		gotJobs = append(gotJobs, job)
+	}
+	if len(gotJobs) != 1 || gotJobs[0].RelativePath != "images/hero.jpg" {
+		t.Fatalf("expected only the source image to be queued, got %#v", gotJobs)
+	}
+
+	for record := range results {
+		if strings.Contains(record.RelativePath, "generated") || strings.Contains(record.RelativePath, ".webp") {
+			t.Fatalf("expected out-dir aliases to be skipped, got %#v", record)
+		}
 	}
 }
 

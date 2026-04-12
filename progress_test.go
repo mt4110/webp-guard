@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -45,5 +46,23 @@ func TestFormatProgressLineWithFixedTotal(t *testing.T) {
 		if !strings.Contains(line, needle) {
 			t.Fatalf("expected %q to contain %q", line, needle)
 		}
+	}
+}
+
+func TestProgressClearForLogClearsRenderedLine(t *testing.T) {
+	var buf bytes.Buffer
+	progress := &progressReporter{
+		writer:    &buf,
+		enabled:   true,
+		lastWidth: 5,
+	}
+
+	progress.ClearForLog()
+
+	if got := buf.String(); got != "\r     \r" {
+		t.Fatalf("expected clear sequence, got %q", got)
+	}
+	if progress.lastWidth != 0 {
+		t.Fatalf("expected lastWidth reset, got %d", progress.lastWidth)
 	}
 }

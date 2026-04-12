@@ -124,6 +124,17 @@ func (p *progressReporter) Close() {
 	p.finished = true
 }
 
+func (p *progressReporter) ClearForLog() {
+	if !p.enabled {
+		return
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.clearLocked()
+}
+
 func (p *progressReporter) renderLocked(force bool) {
 	if !p.enabled || p.finished {
 		return
@@ -153,6 +164,15 @@ func (p *progressReporter) renderLocked(force bool) {
 	_, _ = fmt.Fprintf(p.writer, "\r%s%s", line, padding)
 	p.lastWidth = len(line)
 	p.lastRender = now
+}
+
+func (p *progressReporter) clearLocked() {
+	if p.finished || p.lastWidth == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(p.writer, "\r%s\r", strings.Repeat(" ", p.lastWidth))
+	p.lastWidth = 0
+	p.lastRender = time.Time{}
 }
 
 func formatProgressLine(snapshot progressSnapshot) string {
