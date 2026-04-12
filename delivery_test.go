@@ -514,6 +514,60 @@ func TestValidateDeployPlanRejectsDisabledVerifyWithChecks(t *testing.T) {
 	}
 }
 
+func TestValidateDeployPlanRejectsEscapingOriginRootDir(t *testing.T) {
+	planBaseDir := t.TempDir()
+	err := validateDeployPlan(DeployPlan{
+		baseDir: planBaseDir,
+		Origin: OriginTarget{
+			Provider: "local",
+			RootDir:  "../outside-origin",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected escaping origin root_dir to fail validation")
+	}
+	if !strings.Contains(err.Error(), "invalid origin root_dir") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateDeployPlanRejectsVerifyURLOutsideCDNBaseURL(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		CDN: CDNTarget{
+			BaseURL: "https://cdn.example.com/assets",
+		},
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+			Checks: []VerifyCheck{
+				{URL: "https://evil.example.com/assets/release-manifest.json"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected verify url outside cdn.base_url to fail validation")
+	}
+	if !strings.Contains(err.Error(), "verify url") || !strings.Contains(err.Error(), "cdn.base_url") {
+		t.Fatalf("unexpected verify url validation error: %v", err)
+	}
+}
+
+func TestValidateDeployPlanRejectsVerifyURLWhenCDNBaseURLEmpty(t *testing.T) {
+	err := validateDeployPlan(DeployPlan{
+		Verify: DeliveryVerifyPlan{
+			Enabled: true,
+			Checks: []VerifyCheck{
+				{URL: "https://cdn.example.com/assets/release-manifest.json"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected verify url without cdn.base_url to fail validation")
+	}
+	if !strings.Contains(err.Error(), "cdn.base_url is empty") {
+		t.Fatalf("unexpected verify url validation error: %v", err)
+	}
+}
+
 func TestResolveVerifyCheckURLRejectsEscapingObjectKey(t *testing.T) {
 	planBaseDir := t.TempDir()
 	originRoot := filepath.Join(planBaseDir, "origin")
@@ -709,6 +763,32 @@ func TestRunPlanRejectsReleaseManifestOutsideArtifactRoot(t *testing.T) {
 	}
 	if _, statErr := os.Stat(releaseManifest); !os.IsNotExist(statErr) {
 		t.Fatalf("expected no release manifest to be written outside artifact root, got err=%v", statErr)
+	}
+}
+
+func TestRunPlanRejectsOriginRootOutsideArtifactRoot(t *testing.T) {
+	artifactDir := filepath.Join(t.TempDir(), "artifact")
+	deployPlanPath := filepath.Join(artifactDir, "deploy-plan.dev.json")
+	releaseManifest := filepath.Join(artifactDir, "release-manifest.json")
+	originRoot := filepath.Join(t.TempDir(), "origin")
+
+	var stdout bytes.Buffer
+	_, err := RunPlan(context.Background(), PlanConfig{
+		ConversionManifestPath: filepath.Join(artifactDir, "conversion-manifest.json"),
+		ReleaseManifestPath:    releaseManifest,
+		DeployPlanPath:         deployPlanPath,
+		Environment:            "dev",
+		OriginProvider:         "local",
+		OriginRoot:             originRoot,
+		CDNProvider:            "noop",
+		ImmutablePrefix:        "assets",
+		MutablePrefix:          "release",
+	}, &stdout)
+	if err == nil {
+		t.Fatal("expected origin root outside artifact root to fail")
+	}
+	if !strings.Contains(err.Error(), "origin root") || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("unexpected plan error: %v", err)
 	}
 }
 

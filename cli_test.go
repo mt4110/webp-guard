@@ -215,6 +215,15 @@ func TestRootCompletionFlagsIncludeVersionAliases(t *testing.T) {
 	}
 }
 
+func TestBulkCompletionFlagsExcludeRootOnlyVersionAliases(t *testing.T) {
+	words := completionWords(bulkCompletionFlags)
+	for _, needle := range []string{"-version", "--version"} {
+		if strings.Contains(words, needle) {
+			t.Fatalf("expected bulk completion flags to exclude %q, got %v", needle, bulkCompletionFlags)
+		}
+	}
+}
+
 func TestBashCompletionKeepsCompletionFlagsCompletable(t *testing.T) {
 	script := renderBashCompletionScript()
 	if strings.Contains(script, `-shell|completion)`) {

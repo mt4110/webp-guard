@@ -213,18 +213,20 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 
 	summary.FinishedAt = time.Now().UTC()
 	if manifestWriter != nil {
-		if err := manifestWriter.Close(summary); err != nil {
+		mw := manifestWriter
+		manifestWriter = nil
+		if err := mw.Close(summary); err != nil {
 			return Summary{}, err
 		}
-		manifestWriter = nil
 	}
 	progress.Finish(summary)
 
 	writeLine(stdout, formatSummary(summary))
-	if err := reportWriter.Close(); err != nil {
+	rw := reportWriter
+	reportWriter = nil
+	if err := rw.Close(); err != nil {
 		return Summary{}, err
 	}
-	reportWriter = nil
 	return summary, nil
 }
 

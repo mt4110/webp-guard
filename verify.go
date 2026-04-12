@@ -176,10 +176,11 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 	summary.FinishedAt = time.Now().UTC()
 	progress.Finish(summary)
 	writeLine(stdout, formatSummary(summary))
-	if err := reportWriter.Close(); err != nil {
+	rw := reportWriter
+	reportWriter = nil
+	if err := rw.Close(); err != nil {
 		return Summary{}, err
 	}
-	reportWriter = nil
 	return summary, nil
 }
 

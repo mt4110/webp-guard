@@ -367,6 +367,13 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 	if err != nil {
 		return PlanSummary{}, err
 	}
+	originRootPath := ""
+	if strings.TrimSpace(cfg.OriginRoot) != "" {
+		originRootPath, err = resolveContainedArtifactPath(artifactRoot, cfg.OriginRoot, "origin root")
+		if err != nil {
+			return PlanSummary{}, err
+		}
+	}
 	conversionManifest, err := readConversionManifest(cfg.ConversionManifestPath)
 	if err != nil {
 		return PlanSummary{}, err
@@ -582,8 +589,8 @@ func RunPlan(ctx context.Context, cfg PlanConfig, stdout io.Writer) (PlanSummary
 		return PlanSummary{}, err
 	}
 	originRootRel := ""
-	if cfg.OriginRoot != "" {
-		originRootRel, err = relativeArtifactPath(artifactRoot, cfg.OriginRoot)
+	if originRootPath != "" {
+		originRootRel, err = relativeArtifactPath(artifactRoot, originRootPath)
 		if err != nil {
 			return PlanSummary{}, err
 		}
@@ -782,6 +789,16 @@ func validateDeployPlan(plan DeployPlan) error {
 	if !plan.Verify.Enabled && len(plan.Verify.Checks) > 0 {
 		return fmt.Errorf("deploy plan has verify checks but verify is disabled")
 	}
+	if plan.Origin.Provider == "local" {
+		if strings.TrimSpace(plan.Origin.RootDir) == "" {
+			return fmt.Errorf("local origin requires root_dir")
+		}
+		if plan.baseDir != "" {
+			if _, err := resolveContainedArtifactPath(plan.baseDir, plan.Origin.RootDir, "origin root_dir"); err != nil {
+				return fmt.Errorf("invalid origin root_dir %q: %w", plan.Origin.RootDir, err)
+			}
+		}
+	}
 	for _, req := range append(append([]UploadRequest{}, plan.Uploads...), plan.MutableUploads...) {
 		if strings.TrimSpace(req.LocalPath) == "" {
 			return fmt.Errorf("deploy plan contains upload with empty local_path")
@@ -796,11 +813,20 @@ func validateDeployPlan(plan DeployPlan) error {
 		}
 	}
 	for _, check := range plan.Verify.Checks {
-		if strings.TrimSpace(check.ObjectKey) == "" {
-			continue
+		hasObjectKey := strings.TrimSpace(check.ObjectKey) != ""
+		hasURL := strings.TrimSpace(check.URL) != ""
+		if !hasObjectKey && !hasURL {
+			return fmt.Errorf("verify check is missing both url and object_key")
 		}
-		if _, err := normalizeObjectKey(check.ObjectKey); err != nil {
-			return fmt.Errorf("invalid verify object key %q: %w", check.ObjectKey, err)
+		if hasObjectKey {
+			if _, err := normalizeObjectKey(check.ObjectKey); err != nil {
+				return fmt.Errorf("invalid verify object key %q: %w", check.ObjectKey, err)
+			}
+		}
+		if hasURL {
+			if err := validateVerifyCheckURL(plan, check.URL); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -873,7 +899,7 @@ func newOriginAdapter(plan DeployPlan) (OriginAdapter, error) {
 		if strings.TrimSpace(plan.Origin.RootDir) == "" {
 			return nil, fmt.Errorf("local origin requires root_dir")
 		}
-		rootDir, err := resolvePlanPath(plan.baseDir, plan.Origin.RootDir)
+		rootDir, err := resolveContainedArtifactPath(plan.baseDir, plan.Origin.RootDir, "origin root_dir")
 		if err != nil {
 			return nil, err
 		}
@@ -1022,7 +1048,7 @@ func executeVerifyCheck(ctx context.Context, client *http.Client, plan DeployPla
 	case "file":
 		return verifyFileURL(ctx, parsed, check)
 	case "http", "https":
-		return verifyHTTPURL(ctx, client, check)
+		return verifyHTTPURL(ctx, client, targetURL, check)
 	default:
 		return false, fmt.Sprintf("unsupported verify scheme %q", parsed.Scheme), nil
 	}
@@ -1095,8 +1121,8 @@ func hasWindowsDrivePath(path string) bool {
 	return len(path) >= 3 && path[0] == '/' && isWindowsDriveVolume(path[1:3])
 }
 
-func verifyHTTPURL(ctx context.Context, client *http.Client, check VerifyCheck) (bool, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, check.URL, nil)
+func verifyHTTPURL(ctx context.Context, client *http.Client, targetURL string, check VerifyCheck) (bool, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return false, "", err
 	}
@@ -1453,6 +1479,43 @@ func relativeArtifactPath(baseDir string, target string) (string, error) {
 		return "", err
 	}
 	return filepath.ToSlash(relativePath), nil
+}
+
+func validateVerifyCheckURL(plan DeployPlan, rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid verify url %q: %w", rawURL, err)
+	}
+	if !parsed.IsAbs() || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return fmt.Errorf("invalid verify url %q: must be an absolute http or https URL", rawURL)
+	}
+	if strings.TrimSpace(plan.CDN.BaseURL) == "" {
+		return fmt.Errorf("verify url %q is not allowed when cdn.base_url is empty", rawURL)
+	}
+
+	baseURL, err := url.Parse(plan.CDN.BaseURL)
+	if err != nil {
+		return fmt.Errorf("invalid plan cdn.base_url %q: %w", plan.CDN.BaseURL, err)
+	}
+	if !strings.EqualFold(parsed.Scheme, baseURL.Scheme) || !strings.EqualFold(parsed.Host, baseURL.Host) {
+		return fmt.Errorf("verify url %q must stay under cdn.base_url %q", rawURL, plan.CDN.BaseURL)
+	}
+	if !urlPathWithinBase(baseURL, parsed) {
+		return fmt.Errorf("verify url %q must stay under cdn.base_url %q", rawURL, plan.CDN.BaseURL)
+	}
+	return nil
+}
+
+func urlPathWithinBase(baseURL *url.URL, targetURL *url.URL) bool {
+	basePath := strings.TrimSuffix(pathpkg.Clean(baseURL.EscapedPath()), "/")
+	if basePath == "." {
+		basePath = ""
+	}
+	targetPath := pathpkg.Clean(targetURL.EscapedPath())
+	if basePath == "" || basePath == "/" {
+		return strings.HasPrefix(targetPath, "/")
+	}
+	return targetPath == basePath || strings.HasPrefix(targetPath, basePath+"/")
 }
 
 func resolveArtifactPath(baseDir string, target string) (string, error) {

@@ -31,7 +31,13 @@ var (
 		"-dry-run", "-out-dir", "-overwrite", "-on-existing", "-report", "-manifest",
 		"-resume-from", "-json", "-config", "-no-config", "-h", "--help", "-version",
 	)
-	bulkCompletionFlags = rootCompletionFlags
+	bulkCompletionFlags = flagVariants(
+		"-dir", "-extensions", "-include", "-exclude", "-include-hidden", "-follow-symlinks",
+		"-max-file-size-mb", "-max-pixels", "-max-dimension", "-cpus", "-max-width",
+		"-aspect-variants", "-crop-mode", "-focus-x", "-focus-y", "-quality", "-workers",
+		"-dry-run", "-out-dir", "-overwrite", "-on-existing", "-report", "-manifest",
+		"-resume-from", "-json", "-config", "-no-config", "-h", "--help",
+	)
 	scanCompletionFlags = flagVariants(
 		"-dir", "-extensions", "-include", "-exclude", "-include-hidden", "-follow-symlinks",
 		"-max-file-size-mb", "-max-pixels", "-max-dimension", "-cpus", "-report", "-json",
