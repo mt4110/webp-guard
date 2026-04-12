@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -156,6 +157,18 @@ func detectConfigSelection(args []string) (configSelection, error) {
 		switch {
 		case arg == "-no-config" || arg == "--no-config":
 			selection.NoConfig = true
+		case strings.HasPrefix(arg, "-no-config="):
+			value, err := strconv.ParseBool(strings.TrimSpace(strings.TrimPrefix(arg, "-no-config=")))
+			if err != nil {
+				return configSelection{}, fmt.Errorf("invalid boolean for -no-config: %w", err)
+			}
+			selection.NoConfig = value
+		case strings.HasPrefix(arg, "--no-config="):
+			value, err := strconv.ParseBool(strings.TrimSpace(strings.TrimPrefix(arg, "--no-config=")))
+			if err != nil {
+				return configSelection{}, fmt.Errorf("invalid boolean for --no-config: %w", err)
+			}
+			selection.NoConfig = value
 		case arg == "-config" || arg == "--config":
 			if index+1 >= len(args) {
 				return configSelection{}, fmt.Errorf("%s requires a path", arg)

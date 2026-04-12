@@ -914,6 +914,50 @@ func TestResumeReprocessesWhenQualityChanges(t *testing.T) {
 	}
 }
 
+func TestResumeSkipsWhenResumeFromEqualsReportPath(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "hero.jpg")
+	writeJPEG(t, source, 1200, 600)
+
+	reportPath := filepath.Join(root, "bulk.jsonl")
+	cfg := testConfig(root)
+	cfg.ExistingPolicy = existingOverwrite
+	cfg.ReportPath = reportPath
+	cfg = withConfigFingerprint(cfg)
+
+	var stdout bytes.Buffer
+	summary, err := RunProcessCommand(context.Background(), cfg, newDimensionAwareFakeEncoder(t, 64, nil), &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Converted != 1 {
+		t.Fatalf("expected initial conversion, got %#v", summary)
+	}
+
+	resumeCfg := cfg
+	resumeCfg.Mode = modeResume
+	resumeCfg.ResumeFrom = reportPath
+	resumeCfg.ReportPath = reportPath
+	resumeCfg = withConfigFingerprint(resumeCfg)
+
+	stdout.Reset()
+	summary, err = RunProcessCommand(context.Background(), resumeCfg, newDimensionAwareFakeEncoder(t, 64, nil), &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Skipped != 1 || summary.Converted != 0 {
+		t.Fatalf("expected resume to keep prior checkpoint data even when report path is reused, got %#v", summary)
+	}
+
+	reportContent, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(reportContent), `"status":"skipped_resume"`) {
+		t.Fatalf("expected reused report path to contain skipped_resume record, got %s", reportContent)
+	}
+}
+
 func TestWalkTreeRejectsUnsupportedImageFormats(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "anim.gif"), []byte("gif"), 0o644); err != nil {

@@ -109,6 +109,11 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 		StatusCounts: map[string]int{},
 	}
 
+	resumeSet, err := loadResumeSet(cfg.ResumeFrom, cfg.ConfigFingerprint)
+	if err != nil {
+		return Summary{}, err
+	}
+
 	reportWriter, err := reportWriterFactory(cfg.ReportPath)
 	if err != nil {
 		return Summary{}, err
@@ -132,14 +137,11 @@ func RunProcessCommand(ctx context.Context, cfg ProcessConfig, encoder Encoder, 
 	}
 	defer func() {
 		if manifestWriter != nil {
-			_ = manifestWriter.Close(summary)
+			if closeErr := manifestWriter.Close(summary); err == nil && closeErr != nil {
+				err = closeErr
+			}
 		}
 	}()
-
-	resumeSet, err := loadResumeSet(cfg.ResumeFrom, cfg.ConfigFingerprint)
-	if err != nil {
-		return Summary{}, err
-	}
 
 	writef(stdout, "Starting %s on %s (extensions=%s, cpus=%d, workers=%d)\n", cfg.Mode, cfg.RootDir, strings.Join(cfg.ExtensionList, ","), cfg.CPUs, cfg.Workers)
 
