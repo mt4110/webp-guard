@@ -1,0 +1,194 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"runtime"
+	"strings"
+	"time"
+
+	"golang.org/x/image/webp"
+)
+
+var webpDimensionsDecoder = decodeWebPDimensions
+
+func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary Summary, err error) {
+	if err := ctx.Err(); err != nil {
+		return Summary{}, err
+	}
+
+	previousGOMAXPROCS := runtime.GOMAXPROCS(cfg.CPUs)
+	defer runtime.GOMAXPROCS(previousGOMAXPROCS)
+
+	summary = Summary{
+		Command:      string(modeVerify),
+		RootDir:      cfg.RootDir,
+		StartedAt:    time.Now().UTC(),
+		StatusCounts: map[string]int{},
+	}
+
+	writef(stdout, "Starting verify on %s using %s (cpus=%d)\n", cfg.RootDir, cfg.ManifestPath, cfg.CPUs)
+
+	if err := rejectPathCollisions(
+		labeledPath{label: "report", path: cfg.ReportPath},
+		labeledPath{label: "manifest", path: cfg.ManifestPath},
+	); err != nil {
+		return Summary{}, err
+	}
+
+	manifest, err := readConversionManifest(cfg.ManifestPath)
+	if err != nil {
+		return Summary{}, err
+	}
+	sourceRoot, err := resolveConversionManifestSourceRoot(manifest, cfg.RootDir)
+	if err != nil {
+		return Summary{}, err
+	}
+	outputRoot, err := resolveConversionManifestOutputRoot(manifest)
+	if err != nil {
+		return Summary{}, err
+	}
+
+	reportWriter, err := reportWriterFactory(cfg.ReportPath)
+	if err != nil {
+		return Summary{}, err
+	}
+	defer func() {
+		if reportWriter != nil {
+			if closeErr := reportWriter.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
+	}()
+
+	progress := newProgressReporterWithWriter(stdout, isInteractiveStream(stdout), string(modeVerify), len(manifest.Entries))
+	defer progress.Close()
+	progress.MarkWalkDone()
+
+	for _, entry := range manifest.Entries {
+		if err := ctx.Err(); err != nil {
+			return Summary{}, err
+		}
+
+		sourcePath, pathErr := resolveContainedArtifactPath(sourceRoot, entry.SourcePath, "source path")
+		record := newRecord(modeVerify, "", entry.SourcePath, entry.RelativePath, extWithoutDot(entry.SourcePath), "")
+		record.OutputPath = entry.OutputPath
+		if resolvedOutputPath, resolveErr := resolveContainedArtifactPath(outputRoot, entry.OutputPath, "output path"); resolveErr == nil {
+			record.OutputPath = resolvedOutputPath
+		}
+		record.FileSizeBytes = entry.SourceSizeBytes
+		record.OutputSizeBytes = entry.OutputSizeBytes
+		record.Width = entry.Width
+		record.Height = entry.Height
+		record.OutputWidth = entry.OutputWidth
+		record.OutputHeight = entry.OutputHeight
+		record.Quality = entry.Quality
+		record.Orientation = entry.Orientation
+		record.OrientationApplied = entry.OrientationApplied
+		record.Resized = entry.Resized
+		record.OutputVariants = manifestEntryOutputVariants(entry)
+
+		if pathErr != nil {
+			record.Status = "verify_missing_source"
+			record.Error = pathErr.Error()
+		} else {
+			record.Path = sourcePath
+		}
+
+		var info os.FileInfo
+		if pathErr != nil {
+			// path resolution already failed, keep that as the primary error
+		} else if statInfo, err := os.Stat(sourcePath); err != nil {
+			record.Status = "verify_missing_source"
+			record.Error = err.Error()
+		} else if statInfo.Size() != entry.SourceSizeBytes {
+			record.Status = "verify_source_changed"
+			record.Reason = fmt.Sprintf("source size changed from %d to %d", entry.SourceSizeBytes, statInfo.Size())
+		} else if len(record.OutputVariants) == 0 {
+			record.Status = "verify_missing_output"
+			record.Error = "manifest entry has no output path"
+		} else {
+			info = statInfo
+			record.Status = "verify_ok"
+			for index, variant := range record.OutputVariants {
+				outputPath, resolveErr := resolveContainedArtifactPath(outputRoot, variant.OutputPath, "output path")
+				if resolveErr != nil {
+					record.Status = "verify_missing_output"
+					record.Error = decorateVerifyVariantError(variant, resolveErr.Error())
+					break
+				}
+				record.OutputVariants[index].OutputPath = outputPath
+
+				outputInfo, outErr := os.Stat(outputPath)
+				if outErr != nil {
+					record.Status = "verify_missing_output"
+					record.Error = decorateVerifyVariantError(variant, outErr.Error())
+					break
+				}
+				if outputInfo.Size() >= info.Size() {
+					record.Status = "verify_size_regression"
+					record.Reason = decorateVerifyVariantError(variant, fmt.Sprintf("output %d is not smaller than source %d", outputInfo.Size(), info.Size()))
+					break
+				}
+
+				width, height, decodeErr := webpDimensionsDecoder(outputPath)
+				if decodeErr != nil {
+					record.Status = "verify_decode_failed"
+					record.Error = decorateVerifyVariantError(variant, decodeErr.Error())
+					break
+				}
+				if width != variant.OutputWidth || height != variant.OutputHeight {
+					record.Status = "verify_dimension_mismatch"
+					record.Reason = decorateVerifyVariantError(variant, fmt.Sprintf("manifest=%dx%d actual=%dx%d", variant.OutputWidth, variant.OutputHeight, width, height))
+					break
+				}
+				if width > cfg.MaxWidth {
+					record.Status = "verify_max_width_exceeded"
+					record.Reason = decorateVerifyVariantError(variant, fmt.Sprintf("output width %d exceeds limit %d", width, cfg.MaxWidth))
+					break
+				}
+			}
+		}
+
+		summary.Add(record)
+		progress.Complete(summary)
+		if err := reportWriter.Write(record); err != nil {
+			return Summary{}, err
+		}
+		progress.WriteLine(stdout, formatRecord(record))
+	}
+
+	summary.FinishedAt = time.Now().UTC()
+	progress.Finish(summary)
+	writeLine(stdout, formatSummary(summary))
+	rw := reportWriter
+	reportWriter = nil
+	if err := rw.Close(); err != nil {
+		return Summary{}, err
+	}
+	return summary, nil
+}
+
+func decodeWebPDimensions(path string) (int, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer closeQuietly(file)
+
+	cfg, err := webp.DecodeConfig(file)
+	if err != nil {
+		return 0, 0, err
+	}
+	return cfg.Width, cfg.Height, nil
+}
+
+func decorateVerifyVariantError(variant OutputVariantInfo, message string) string {
+	label := variant.AspectRatio
+	if strings.TrimSpace(label) == "" {
+		label = "primary"
+	}
+	return fmt.Sprintf("%s variant: %s", label, message)
+}
