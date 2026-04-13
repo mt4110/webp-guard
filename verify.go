@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -32,22 +31,11 @@ func RunVerify(ctx context.Context, cfg VerifyConfig, stdout io.Writer) (summary
 
 	writef(stdout, "Starting verify on %s using %s (cpus=%d)\n", cfg.RootDir, cfg.ManifestPath, cfg.CPUs)
 
-	manifestPath, err := filepath.Abs(cfg.ManifestPath)
-	if err != nil {
+	if err := rejectPathCollisions(
+		labeledPath{label: "report", path: cfg.ReportPath},
+		labeledPath{label: "manifest", path: cfg.ManifestPath},
+	); err != nil {
 		return Summary{}, err
-	}
-	manifestPath, err = resolvePathWithExistingSymlinks(manifestPath)
-	if err != nil {
-		return Summary{}, err
-	}
-	if strings.TrimSpace(cfg.ReportPath) != "" {
-		reportPath, err := resolvePathWithExistingSymlinks(cfg.ReportPath)
-		if err != nil {
-			return Summary{}, err
-		}
-		if reportPath == manifestPath {
-			return Summary{}, fmt.Errorf("report and manifest must not point to the same file")
-		}
 	}
 
 	manifest, err := readConversionManifest(cfg.ManifestPath)
