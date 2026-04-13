@@ -191,8 +191,22 @@ func TestBulkDownsizesWithoutUpscaling(t *testing.T) {
 		RelativePath: "thumb.jpg",
 		Extension:    "jpg",
 	}, newDimensionAwareFakeEncoder(t, 64, func(inputPath string, outputPath string, quality int) error {
-		if strings.HasSuffix(inputPath, ".png") {
-			t.Fatalf("did not expect temp resize input for small image")
+		if filepath.Base(inputPath) == filepath.Base(small) {
+			t.Fatalf("expected normalized temp input for small image")
+		}
+
+		file, err := os.Open(inputPath)
+		if err != nil {
+			return err
+		}
+		defer closeQuietly(file)
+
+		cfg, err := png.DecodeConfig(file)
+		if err != nil {
+			return err
+		}
+		if cfg.Width != 800 || cfg.Height != 400 {
+			t.Fatalf("expected temp input 800x400, got %dx%d", cfg.Width, cfg.Height)
 		}
 		return nil
 	}))
@@ -202,6 +216,46 @@ func TestBulkDownsizesWithoutUpscaling(t *testing.T) {
 	}
 	if record.Resized {
 		t.Fatalf("did not expect resize for image under max-width")
+	}
+}
+
+func TestBulkNormalizesPNGInputBeforeEncode(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "artwork.png")
+	writePNG(t, source, 640, 480)
+
+	cfg := testConfig(root)
+
+	record := processJob(context.Background(), cfg, FileJob{
+		Path:         source,
+		RelativePath: "artwork.png",
+		Extension:    "png",
+	}, newDimensionAwareFakeEncoder(t, 96, func(inputPath string, outputPath string, quality int) error {
+		if inputPath == source {
+			t.Fatalf("expected png input to be normalized through a temp file")
+		}
+		if !strings.Contains(filepath.Base(inputPath), ".webp-guard-input-") {
+			t.Fatalf("expected temp input name, got %s", inputPath)
+		}
+
+		file, err := os.Open(inputPath)
+		if err != nil {
+			return err
+		}
+		defer closeQuietly(file)
+
+		cfg, err := png.DecodeConfig(file)
+		if err != nil {
+			return err
+		}
+		if cfg.Width != 640 || cfg.Height != 480 {
+			t.Fatalf("expected temp input 640x480, got %dx%d", cfg.Width, cfg.Height)
+		}
+		return nil
+	}))
+
+	if record.Status != "converted" {
+		t.Fatalf("expected converted, got %s", record.Status)
 	}
 }
 

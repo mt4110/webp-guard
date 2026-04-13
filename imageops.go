@@ -231,20 +231,14 @@ func processJob(ctx context.Context, cfg ProcessConfig, job FileJob, encoder Enc
 			continue
 		}
 
-		inputPath := job.Path
-		cleanupInput := func() {}
-		if record.OrientationApplied || cropped || resized {
-			tempInput, err := writeTempPNG(variantImage, filepath.Dir(plan.OutputPath))
-			if err != nil {
-				record.Status = "failed_write_temp"
-				record.Error = err.Error()
-				record.DurationMillis = time.Since(start).Milliseconds()
-				return record
-			}
-			inputPath = tempInput
-			cleanupInput = func() {
-				_ = os.Remove(tempInput)
-			}
+		// Always normalize pixels through a metadata-free temp PNG before cwebp so
+		// the output never inherits source-container metadata or ancillary chunks.
+		inputPath, cleanupInput, err := prepareEncoderInput(variantImage, filepath.Dir(plan.OutputPath))
+		if err != nil {
+			record.Status = "failed_write_temp"
+			record.Error = err.Error()
+			record.DurationMillis = time.Since(start).Milliseconds()
+			return record
 		}
 
 		tempOutput, cleanupOutput, err := prepareTempOutput(plan.OutputPath)
@@ -670,6 +664,17 @@ func remapImage(img image.Image, dstWidth int, dstHeight int, mapFn func(x, y, w
 		}
 	}
 	return dst
+}
+
+func prepareEncoderInput(img image.Image, dir string) (string, func(), error) {
+	tempInput, err := writeTempPNG(img, dir)
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() {
+		_ = os.Remove(tempInput)
+	}
+	return tempInput, cleanup, nil
 }
 
 func writeTempPNG(img image.Image, dir string) (string, error) {
