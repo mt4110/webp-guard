@@ -1,6 +1,6 @@
 # WebP Guard
 
-[日本語](./README.md)
+[日本語](./README.md) | English | [Security](./SECURITY.md) | [Contributing](./CONTRIBUTING.md)
 
 This is the English companion README. The primary README for this repository is [README.md](./README.md).
 
@@ -9,6 +9,9 @@ It keeps the original asset, writes `.webp` next to it by default or under `-out
 
 Related design note:
 
+- [Security Policy](./SECURITY.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Milestones](./MILESTONES.md)
 - [Release Workflow And Installation Design](./docs/release-installation-design.md) (Japanese primary)
 
 ## Installation

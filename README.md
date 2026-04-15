@@ -1,6 +1,6 @@
 # WebP Guard
 
-[English](./README_EN.md)
+日本語 | [英語](./README_EN.md) | [セキュリティ](./SECURITY.md) | [コントリビュータ](./CONTRIBUTING.md)
 
 日本語を正本にしています。英語版は [README_EN.md](./README_EN.md) に分けています。
 
@@ -9,6 +9,9 @@
 
 関連設計:
 
+- [Security Policy](./SECURITY.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Milestones](./MILESTONES.md)
 - [Release Workflow And Installation Design](./docs/release-installation-design.md)
 
 ## Installation
