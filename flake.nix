@@ -18,6 +18,7 @@
             gopls
             gotools
             golangci-lint
+            govulncheck
             libwebp # Provides cwebp, dwebp, etc.
           ];
         };

@@ -595,3 +595,35 @@ func TestDoctorJSONReportsCWebPVersion(t *testing.T) {
 		t.Fatalf("expected encoder-version check, got %#v", summary.Checks)
 	}
 }
+
+func TestResumeAndVerifyUseTheirOwnConfigSections(t *testing.T) {
+	root := t.TempDir()
+	resumeReport := filepath.Join(root, "previous-report.jsonl")
+	verifyManifest := filepath.Join(root, "conversion-manifest.json")
+	config := `schema_version = 1
+
+[resume]
+resume_from = "./previous-report.jsonl"
+
+[verify]
+manifest = "./conversion-manifest.json"
+`
+	if err := os.WriteFile(filepath.Join(root, defaultConfigFileName), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	_, err := run(context.Background(), []string{"resume"}, fakeEncoder{}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), resumeReport) {
+		t.Fatalf("expected resume to load resume.resume_from %q, got %v", resumeReport, err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	_, err = run(context.Background(), []string{"verify"}, fakeEncoder{}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), verifyManifest) {
+		t.Fatalf("expected verify to load verify.manifest %q, got %v", verifyManifest, err)
+	}
+}
