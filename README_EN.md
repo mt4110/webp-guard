@@ -1,10 +1,10 @@
-# WebP Guard
+# WebP Guard — Safe Bulk Image-to-WebP CLI
 
 [日本語](./README.md) | English | [Security](./SECURITY.md) | [Contributing](./CONTRIBUTING.md)
 
 This is the English companion README. The primary README for this repository is [README.md](./README.md).
 
-`webp-guard` is a beta Go CLI for safe, resumable bulk image scanning, WebP generation, and cache-first delivery planning.
+`webp-guard` is a resumable beta Go CLI that safely converts JPEG/PNG images to WebP in bulk, verifies the generated assets, and produces delivery plans.
 It keeps the original asset, writes `.webp` next to it by default or under `-out-dir` when you want a clean artifact tree, and discards the candidate when the output is larger than the source.
 
 Related design note:
@@ -38,6 +38,7 @@ Install `cwebp` right before you move on to real conversions.
 ### Go Install
 
 Use this when you already manage your own Go toolchain.
+Go 1.26 or later is required.
 
 ```bash
 go install github.com/mt4110/webp-guard@latest
