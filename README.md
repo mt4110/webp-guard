@@ -1,10 +1,10 @@
-# WebP Guard
+# WebP Guard — 安全な一括画像→WebP CLI
 
 日本語 | [英語](./README_EN.md) | [セキュリティ](./SECURITY.md) | [コントリビュータ](./CONTRIBUTING.md)
 
 日本語を正本にしています。英語版は [README_EN.md](./README_EN.md) に分けています。
 
-`webp-guard` は、安全に再実行できる bulk scan + WebP 生成と、cache-first 配信 planning を担う beta の Go CLI です。
+`webp-guard` は、JPEG/PNG を安全に WebP へ一括変換し、生成結果を検証して配信計画まで出力する、再実行可能な beta Go CLI です。
 元画像は残し、既定では隣に `.webp` を生成し、CI などで作業ツリーを汚したくないときは `-out-dir` 配下にミラー出力できます。変換後サイズが悪化した場合はその生成物を破棄します。
 
 関連設計:
@@ -38,6 +38,7 @@ webp-guard bulk --dir ./assets --dry-run
 ### Go Install
 
 Go toolchain を自前で管理しているならこちらです。
+Go 1.26 以降が必要です。
 
 ```bash
 go install github.com/mt4110/webp-guard@latest

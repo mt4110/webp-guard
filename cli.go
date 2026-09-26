@@ -223,7 +223,7 @@ func runScanCommand(ctx context.Context, args []string, encoder Encoder, stdout,
 }
 
 func runResumeCommand(ctx context.Context, args []string, encoder Encoder, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig("verify", args)
+	runtimeCfg, err := loadRuntimeConfig("resume", args)
 	if err != nil {
 		return exitConfigError, err
 	}
@@ -272,7 +272,7 @@ func runResumeCommand(ctx context.Context, args []string, encoder Encoder, stdou
 }
 
 func runVerifyCommand(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error) {
-	runtimeCfg, err := loadRuntimeConfig("resume", args)
+	runtimeCfg, err := loadRuntimeConfig("verify", args)
 	if err != nil {
 		return exitConfigError, err
 	}
